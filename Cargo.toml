@@ -1,0 +1,14 @@
+[package]
+name = "simtricks"
+version = "0.2.0-alpha.1"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+extism = "0.3.0"
+eframe = "0.22.0"
+matricks_plugin = "0.1.4"
+rfd = "0.11.4"
+serde = "1.0.181"
+serde_json = "1.0.104"
