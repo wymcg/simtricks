@@ -1,11 +1,10 @@
 use matricks_plugin::{MatrixConfiguration, PluginUpdate};
 use std::path::PathBuf;
-use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::{fs, thread};
-use std::str::{from_utf8, from_utf8_unchecked};
+use std::str::from_utf8;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
-use eframe::egui::Context;
 use extism::Plugin;
 use serde_json::from_str;
 

@@ -1,8 +1,6 @@
-use std::sync::mpsc::TryRecvError;
 use crate::plugin_thread::{start_plugin_thread, PluginThread};
 use eframe::egui::{Context, Pos2, Rect, Rounding, Sense, Vec2};
 use eframe::{egui, App, Frame};
-use eframe::egui::Shape::Vec;
 use eframe::emath::RectTransform;
 use matricks_plugin::{MatrixConfiguration, PluginUpdate};
 
@@ -36,7 +34,7 @@ impl Default for SimulatorApp {
 }
 
 impl App for SimulatorApp {
-    fn update(&mut self, ctx: &Context, frame: &mut Frame) {
+    fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
         // Attempt to get an update from the plugin thread
         match self.plugin_thread.channels.update_rx.try_recv() {
             Ok(update) => {
@@ -88,7 +86,7 @@ impl App for SimulatorApp {
                 });
 
                 // Display settings
-                ui.menu_button("Display", |ui| {});
+                ui.menu_button("Display", |_ui| {});
             });
         });
 
