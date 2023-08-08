@@ -74,7 +74,10 @@ fn plugin_thread(
                 let update = from_str::<PluginUpdate>(update_str).expect("Unable to deserialize update!");
 
                 // Send the update to the GUI
-                update_tx.send(update).expect("Unable to send update!");
+                update_tx.send(update.clone()).expect("Unable to send update!");
+
+                // Go to the next plugin if the plugin indicates it is done providing updates
+                if update.done { break 'update_loop; }
 
                 // Go to the next plugin if requested by the GUI
                 match next_plugin_rx.try_recv() {
