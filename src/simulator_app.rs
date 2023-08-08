@@ -6,12 +6,17 @@ use matricks_plugin::{MatrixConfiguration, PluginUpdate};
 
 const VERSION: Option<&str> = option_env!("CARGO_PKG_VERSION");
 
+pub struct DisplaySettings {
+    pub round_leds: bool
+}
+
 pub struct SimulatorApp {
     plugin_thread: PluginThread,
     matrix_config: MatrixConfiguration,
     current_matrix_config: MatrixConfiguration,
     status_msg: String,
     last_update: PluginUpdate,
+    display_settings: DisplaySettings,
 }
 
 impl Default for SimulatorApp {
@@ -29,6 +34,9 @@ impl Default for SimulatorApp {
             current_matrix_config: MatrixConfiguration::default(),
             status_msg: format!("Welcome to Simtricks v{}", VERSION.unwrap_or("unknown")),
             last_update: PluginUpdate::default(),
+            display_settings: DisplaySettings {
+                round_leds: false,
+            }
         }
     }
 }
@@ -53,6 +61,13 @@ impl App for SimulatorApp {
                 // Plugin open functions
                 ui.menu_button("File", |ui| {
                     if ui.button("Open").clicked() {
+                        // Stop the current plugin
+                        self.plugin_thread
+                            .channels
+                            .next_plugin_tx
+                            .send(())
+                            .expect("Unable to stop active plugin!");
+
                         // Have the user pick a plugin
                         let path = rfd::FileDialog::new()
                             .set_title("Choose a plugin")
@@ -66,12 +81,6 @@ impl App for SimulatorApp {
                         match path {
                             None => {}
                             Some(path) => {
-                                // Stop the current plugin
-                                self.plugin_thread
-                                    .channels
-                                    .next_plugin_tx
-                                    .send(())
-                                    .expect("Unable to stop active plugin!");
 
                                 self.set_status_msg(format!("Starting plugin at path {}", path.to_str().unwrap()));
 
@@ -95,7 +104,9 @@ impl App for SimulatorApp {
                 });
 
                 // Display settings
-                ui.menu_button("Display", |_ui| {});
+                ui.menu_button("Display", |ui| {
+                    ui.checkbox(&mut self.display_settings.round_leds, "Round LEDs");
+                });
             });
         });
 
@@ -120,6 +131,13 @@ impl App for SimulatorApp {
             ].iter().min_by(|a, b| a.partial_cmp(b).unwrap()) // Pick smaller of the two
                 .unwrap().clone(); // It's still a &f32, so clone it
 
+            // Setup the LED roundness parameter
+            let rounding = if self.display_settings.round_leds {
+                Rounding::same(sidelength)
+            } else {
+                Rounding::none()
+            };
+
             // Draw the LEDs if the plugin update state is consistent with the current matrix config
             if self.last_update.state.len() > 0 && self.last_update.state.len() == self.current_matrix_config.height && self.last_update.state[0].len() == self.current_matrix_config.width {
                 for y in 0..self.current_matrix_config.height {
@@ -138,7 +156,7 @@ impl App for SimulatorApp {
                                 to_screen.transform_pos(Pos2::new(x as f32 * sidelength, y as f32 * sidelength)),
                                 Vec2::new(sidelength, sidelength)
                             ),
-                            Rounding::same(0.0),
+                            rounding,
                             led_color
                         );
                     }
