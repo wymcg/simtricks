@@ -37,8 +37,11 @@ pub fn start_plugin_thread() -> PluginThread {
 fn plugin_thread(
     update_tx: Sender<PluginUpdate>,
     plugin_info_rx: Receiver<(PathBuf, MatrixConfiguration)>,
-    stop_rx: Receiver<()>,
+    next_plugin_rx: Receiver<()>,
 ) {
+    // Wait for the user to choose a file
+    for _ in &next_plugin_rx { break; }
+
     for (path, mat_config) in &plugin_info_rx {
         // Calculate ms per frame
         let target_frame_time_ms = Duration::from_nanos((1_000_000_000.0 / mat_config.target_fps).round() as u64);
@@ -74,7 +77,7 @@ fn plugin_thread(
                 update_tx.send(update).expect("Unable to send update!");
 
                 // Go to the next plugin if requested by the GUI
-                match stop_rx.try_recv() {
+                match next_plugin_rx.try_recv() {
                     Ok(()) => {break 'update_loop}
                     Err(_) => {/* do nothing */}
                 }

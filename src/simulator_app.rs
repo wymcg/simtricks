@@ -66,6 +66,12 @@ impl App for SimulatorApp {
                         match path {
                             None => {}
                             Some(path) => {
+                                // Stop the current plugin
+                                self.plugin_thread
+                                    .channels
+                                    .next_plugin_tx
+                                    .send(())
+                                    .expect("Unable to stop active plugin!");
 
                                 self.set_status_msg(format!("Starting plugin at path {}", path.to_str().unwrap()));
 
@@ -109,15 +115,15 @@ impl App for SimulatorApp {
 
             // Calculate the LED sidelength for x and y based on the window size and number of pixels, and choose smallest value for LED sidelength
             let sidelength= [
-                response.rect.width() / self.matrix_config.width as f32,    // Sidelength from width
-                response.rect.height() / self.matrix_config.height as f32,  // Sidelength from height
+                response.rect.width() / self.current_matrix_config.width as f32,    // Sidelength from width
+                response.rect.height() / self.current_matrix_config.height as f32,  // Sidelength from height
             ].iter().min_by(|a, b| a.partial_cmp(b).unwrap()) // Pick smaller of the two
                 .unwrap().clone(); // It's still a &f32, so clone it
 
-            // Draw the LEDs if the plugin update state
-            if self.last_update.state.len() == self.matrix_config.height && self.last_update.state[0].len() == self.matrix_config.width {
-                for y in 0..self.matrix_config.height {
-                    for x in 0..self.matrix_config.width {
+            // Draw the LEDs if the plugin update state is consistent with the current matrix config
+            if self.last_update.state.len() > 0 && self.last_update.state.len() == self.current_matrix_config.height && self.last_update.state[0].len() == self.current_matrix_config.width {
+                for y in 0..self.current_matrix_config.height {
+                    for x in 0..self.current_matrix_config.width {
                         // Grab the color of this LED from the last update
                         let led_color = egui::Color32::from_rgba_premultiplied(
                             self.last_update.state[y][x][2],
