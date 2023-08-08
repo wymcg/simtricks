@@ -40,6 +40,9 @@ impl App for SimulatorApp {
             Ok(update) => {
                 // Save this update
                 self.last_update = update;
+
+                // Request a repaint now that we have a new update
+                ctx.request_repaint();
             }
             Err(_) => {/* No update was provided, so do nothing */}
         }
