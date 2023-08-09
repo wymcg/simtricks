@@ -84,8 +84,7 @@ impl App for SimulatorApp {
                     ui.add(egui::Slider::new(&mut self.matrix_config.target_fps, 1.0..=144.0).text("FPS"));
                     ui.add(egui::Slider::new(&mut self.matrix_config.width, 1..=500).text("Width"));
                     ui.add(egui::Slider::new(&mut self.matrix_config.height, 1..=500).text("Height"));
-                    ui.label("Note: any changes made here will not be reflected until a new plugin is started!");
-                    if ui.button("Reload").clicked() {
+                    if ui.button("Reload Matrix").clicked() {
                         // Attempt to pull the path from the current plugin thread struct
                         let path: Option<PathBuf> = match &self.plugin_thread {
                             None => None,
