@@ -4,8 +4,8 @@ mod plugin_thread;
 use eframe::{egui, NativeOptions};
 use crate::simulator_app::SimulatorApp;
 
-const WINDOW_WIDTH_INITIAL: f32 = 600.0;
-const WINDOW_HEIGHT_INITIAL: f32 = 300.0;
+const WINDOW_WIDTH_INITIAL: f32 = 800.0;
+const WINDOW_HEIGHT_INITIAL: f32 = 850.0;
 
 fn main() {
     // Setup window options
