@@ -4,6 +4,7 @@ use eframe::emath::RectTransform;
 use eframe::{egui, App, Frame};
 use matricks_plugin::{MatrixConfiguration, PluginUpdate};
 use std::path::PathBuf;
+use chrono::prelude::*;
 
 const VERSION: Option<&str> = option_env!("CARGO_PKG_VERSION");
 
@@ -33,7 +34,7 @@ impl Default for SimulatorApp {
                 brightness: u8::MAX,
             },
             current_matrix_config: MatrixConfiguration::default(),
-            status_msg: format!("Welcome to Simtricks v{}", VERSION.unwrap_or("unknown")),
+            status_msg: format!("Welcome to Simtricks v{}!", VERSION.unwrap_or("unknown")),
             last_update: PluginUpdate::default(),
             display_settings: DisplaySettings { round_leds: false },
         }
@@ -178,7 +179,7 @@ impl App for SimulatorApp {
 
 impl SimulatorApp {
     fn set_status_msg(&mut self, msg: String) {
-        self.status_msg = format!(">> {msg}");
+        self.status_msg = format!("[{}]> {msg}", Utc::now().format("%H:%M:%S"));
     }
 
     fn start_plugin(&mut self, path: PathBuf) {
