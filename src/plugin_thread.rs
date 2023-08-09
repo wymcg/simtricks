@@ -1,9 +1,9 @@
 use extism::Plugin;
 use matricks_plugin::{MatrixConfiguration, PluginUpdate};
 use serde_json::from_str;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::from_utf8;
-use std::sync::mpsc::{channel, Receiver, Sender, SendError};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use std::{fs, thread};
@@ -22,11 +22,11 @@ pub fn start_plugin_thread(path: PathBuf, mat_config: MatrixConfiguration) -> Pl
     let (update_tx, update_rx) = channel::<PluginUpdate>();
 
     PluginThread {
-        join_handle: thread::spawn(|| plugin_thread(path.clone(), mat_config, update_tx)),
+        path: path.clone(),
+        join_handle: thread::spawn(|| plugin_thread(path, mat_config, update_tx)),
         channels: PluginThreadChannels {
             update_rx,
         },
-        path,
     }
 }
 

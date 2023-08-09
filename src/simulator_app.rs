@@ -4,7 +4,6 @@ use eframe::emath::RectTransform;
 use eframe::{egui, App, Frame};
 use matricks_plugin::{MatrixConfiguration, PluginUpdate};
 use std::path::PathBuf;
-use std::sync::mpsc::TryRecvError;
 
 const VERSION: Option<&str> = option_env!("CARGO_PKG_VERSION");
 
@@ -26,9 +25,9 @@ impl Default for SimulatorApp {
         Self {
             plugin_thread: None,
             matrix_config: MatrixConfiguration {
-                width: 5,
-                height: 5,
-                target_fps: 5.0,
+                width: 12,
+                height: 12,
+                target_fps: 30.0,
                 serpentine: false,
                 magnification: 1.0,
                 brightness: u8::MAX,
@@ -72,13 +71,7 @@ impl App for SimulatorApp {
                             .pick_file() {
                             None => {/* No file picked, so do nothing */}
                             Some(path) => {
-                                // Get a snapshot of the current matrix config
-                                self.current_matrix_config = self.matrix_config.clone();
-
-                                // Tell user that we're starting a new plugin
-                                self.set_status_msg(format!("Starting plugin at path {}", path.to_str().unwrap()));
-
-                                self.plugin_thread = Some(start_plugin_thread(path, self.current_matrix_config.clone()));
+                                    self.start_plugin(path.clone());
                                 }
 
                             }
@@ -91,6 +84,22 @@ impl App for SimulatorApp {
                     ui.add(egui::Slider::new(&mut self.matrix_config.width, 1..=500).text("Width"));
                     ui.add(egui::Slider::new(&mut self.matrix_config.height, 1..=500).text("Height"));
                     ui.label("Note: any changes made here will not be reflected until a new plugin is started!");
+                    if ui.button("Reload").clicked() {
+                        // Attempt to pull the path from the current plugin thread struct
+                        let path: Option<PathBuf> = match &self.plugin_thread {
+                            None => None,
+                            Some(plugin_thread) => Some(plugin_thread.path.clone())
+                        };
+
+                        // If we were able to get a path, launch a new plugin with it
+                        match path {
+                            None => {self.set_status_msg("No active plugin, reload will be ignored".to_string())}
+                            Some(path) => {
+                                self.start_plugin(path);
+                                self.set_status_msg("Plugin reloaded.".to_string());
+                            }
+                        }
+                    }
                 });
 
                 // Display settings
@@ -170,5 +179,19 @@ impl App for SimulatorApp {
 impl SimulatorApp {
     fn set_status_msg(&mut self, msg: String) {
         self.status_msg = format!(">> {msg}");
+    }
+
+    fn start_plugin(&mut self, path: PathBuf) {
+        // Get a snapshot of the current matrix config
+        self.current_matrix_config = self.matrix_config.clone();
+
+        // Clear the last update
+        self.last_update = Default::default();
+
+        // Start a new plugin thread
+        self.plugin_thread = Some(start_plugin_thread(path.clone(), self.current_matrix_config.clone()));
+
+        // Tell user that a new plugin was started
+        self.set_status_msg(format!("Plugin started with path {}", path.to_str().unwrap()));
     }
 }
