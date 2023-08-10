@@ -42,24 +42,20 @@ impl Default for SimulatorApp {
 }
 
 impl App for SimulatorApp {
-    fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
-        match &self.plugin_thread {
-            None => { /* There is no currently active plugin thread, so do nothing */ }
-            Some(plugin_thread) => {
-                match plugin_thread.channels.update_rx.try_recv() {
-                    Ok(update) => {
-                        // Save this update
-                        self.last_update = update;
-                    }
-                    Err(_) => { /* No new update, so do nothing */ }
-                }
+    fn update(&mut self, ctx: &Context, frame: &mut Frame) {
+        // Non-gui tasks
+        self.check_for_update(ctx);
 
-                // Request a repaint if there is a plugin thread active
-                ctx.request_repaint();
-            }
-        }
+        // Render the GUI
+        self.render_menu_bar(ctx, frame);
+        self.render_matrix(ctx, frame);
+        self.render_status_bar(ctx, frame);
+    }
+}
 
-        // Render the menu bar
+impl SimulatorApp {
+    /// Render the menu bar at the top of the screen
+    fn render_menu_bar(&mut self, ctx: &Context, _frame: &mut Frame) {
         egui::TopBottomPanel::top("menu bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 // Plugin open functions
@@ -72,10 +68,10 @@ impl App for SimulatorApp {
                             .pick_file() {
                             None => {/* No file picked, so do nothing */}
                             Some(path) => {
-                                    self.start_plugin(path.clone());
-                                }
-
+                                self.start_plugin(path.clone());
                             }
+
+                        }
                     }
                 });
 
@@ -108,8 +104,10 @@ impl App for SimulatorApp {
                 });
             });
         });
+    }
 
-        // Render the simulated matrix
+    /// Render the simulated LED matrix
+    fn render_matrix(&mut self, ctx: &Context, _frame: &mut Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             // Allocate our painter
             let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click());
@@ -125,10 +123,10 @@ impl App for SimulatorApp {
                 response.rect.width() / self.current_matrix_config.width as f32, // Sidelength from width
                 response.rect.height() / self.current_matrix_config.height as f32, // Sidelength from height
             ]
-            .iter()
-            .min_by(|a, b| a.partial_cmp(b).unwrap()) // Pick smaller of the two
-            .unwrap()
-            .clone(); // It's still a &f32, so clone it
+                .iter()
+                .min_by(|a, b| a.partial_cmp(b).unwrap()) // Pick smaller of the two
+                .unwrap()
+                .clone(); // It's still a &f32, so clone it
 
             // Setup the LED roundness parameter
             let rounding = if self.display_settings.round_leds {
@@ -168,24 +166,26 @@ impl App for SimulatorApp {
                 }
             }
         });
+    }
 
-        // Render the status message at the bottom of the screen
+    /// Render the status message at the bottom of the screen
+    fn render_status_bar(&mut self, ctx: &Context, _frame: &mut Frame) {
         egui::TopBottomPanel::bottom("status_msg").show(ctx, |ui| {
             ui.label(self.status_msg.clone());
         });
     }
-}
 
-impl SimulatorApp {
+    /// Set the message in the status bar
     fn set_status_msg(&mut self, msg: String) {
         self.status_msg = format!("[{}]> {msg}", Utc::now().format("%H:%M:%S"));
     }
 
+    /// Start a new plugin thread from a path to a plugin
     fn start_plugin(&mut self, path: PathBuf) {
         // Get a snapshot of the current matrix config
         self.current_matrix_config = self.matrix_config.clone();
 
-        // Clear the last update
+        // Clear the last plugin update
         self.last_update = Default::default();
 
         // Start a new plugin thread
@@ -193,5 +193,24 @@ impl SimulatorApp {
 
         // Tell user that a new plugin was started
         self.set_status_msg(format!("Plugin started with path {}", path.to_str().unwrap()));
+    }
+
+    /// Receive an update from the currently active plugin, if there is one
+    fn check_for_update(&mut self, ctx: &Context) {
+        match &self.plugin_thread {
+            None => { /* There is no currently active plugin thread, so do nothing */ }
+            Some(plugin_thread) => {
+                match plugin_thread.channels.update_rx.try_recv() {
+                    Ok(update) => {
+                        // Save this update
+                        self.last_update = update;
+                    }
+                    Err(_) => { /* No new update, so do nothing */ }
+                }
+
+                // Request a repaint if there is a plugin thread active
+                ctx.request_repaint();
+            }
+        }
     }
 }
