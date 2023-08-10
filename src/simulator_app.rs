@@ -64,13 +64,12 @@ impl SimulatorApp {
                         // Have the user pick a plugin
                         match rfd::FileDialog::new()
                             .set_title("Choose a plugin")
-                            .add_filter("Matricks Plugin", &["wasm", "plug"])
+                            .add_filter("Matricks Plugin", &["wasm", "mtx"])
                             .pick_file() {
                             None => {/* No file picked, so do nothing */}
                             Some(path) => {
                                 self.start_plugin(path.clone());
                             }
-
                         }
                     }
                 });
