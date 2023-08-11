@@ -73,8 +73,11 @@ fn plugin_thread(
             let update =
                 from_str::<PluginUpdate>(update_str).expect("Unable to deserialize update!");
 
+            // Check if we should stop after this update
+            let should_halt = update.done;
+
             // Send the update to the GUI
-            match update_tx.send(update.clone()) {
+            match update_tx.send(update) {
                 Ok(_) => {/* Update sent without issue, no further action required */}
                 Err(_) => {
                     /* Assume the main thread has started a new plugin thread and stop this thread */
@@ -82,8 +85,8 @@ fn plugin_thread(
                 }
             }
 
-            // If the plugin says it is done, stop this plugin thread
-            if update.done {
+            // If the plugin requested to stop, then stop
+            if should_halt {
                 break 'update_loop;
             }
         }
