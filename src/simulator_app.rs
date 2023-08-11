@@ -208,34 +208,39 @@ impl SimulatorApp {
         ));
     }
 
-    /// Receive an update from the currently active plugin, if there is one
+    /// Attempt to receive and handle an update from the currently active plugin, if there is one
     fn check_for_update(&mut self, ctx: &Context) {
-        match &self.plugin_thread {
-            None => { /* There is no currently active plugin thread, so do nothing */ }
-            Some(plugin_thread) => {
-                match plugin_thread.channels.update_rx.try_recv() {
-                    Ok(update) => {
-                        // Save this update
-                        self.last_update = update;
+        // Grab the plugin thread if there is one, otherwise return without doing anything
+        let plugin_thread = match &self.plugin_thread {
+            Some(plugin_thread) => plugin_thread,
+            None => return
+        };
 
-                        // If there are logs from the plugin, display them on the status bar
-                        match &self.last_update.log_message {
-                            None => { /* No logs, so do nothing */ }
-                            Some(logs) => {
-                                let mut combined_logs = String::new();
-                                for log in logs {
-                                    combined_logs.push_str(log);
-                                    combined_logs.push('\n');
-                                }
-                                self.set_status_msg(combined_logs);
-                            }
-                        }
-                    }
-                    Err(_) => { /* No new update, so do nothing */ }
+        // Request a repaint
+        ctx.request_repaint();
+
+        // Attempt to pull an update from the thread. If there was none, return without doing anything
+        let update = match plugin_thread.channels.update_rx.try_recv() {
+            Ok(update) => update,
+            Err(_) => return
+        };
+
+        // Save this update
+        self.last_update = update;
+
+        // If there are logs from the plugin, display them on the status bar
+        match &self.last_update.log_message {
+            None => { /* No logs, so do nothing */ }
+            Some(logs) => {
+                // Combine the logs into a single string
+                let mut combined_logs = String::new();
+                for log in logs {
+                    combined_logs.push_str(log);
+                    combined_logs.push('\n');
                 }
 
-                // Request a repaint if there is a plugin thread active
-                ctx.request_repaint();
+                // Push the all logs to the status bar as a single string
+                self.set_status_msg(combined_logs);
             }
         }
     }
