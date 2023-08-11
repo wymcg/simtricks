@@ -1,10 +1,10 @@
 use crate::plugin_thread::{start_plugin_thread, PluginThread};
+use chrono::prelude::*;
 use eframe::egui::{Context, Pos2, Rect, Rounding, Sense, Vec2};
 use eframe::emath::RectTransform;
 use eframe::{egui, App, Frame};
 use matricks_plugin::{MatrixConfiguration, PluginUpdate};
 use std::path::PathBuf;
-use chrono::prelude::*;
 
 const VERSION: Option<&str> = option_env!("CARGO_PKG_VERSION");
 
@@ -65,8 +65,9 @@ impl SimulatorApp {
                         match rfd::FileDialog::new()
                             .set_title("Choose a plugin")
                             .add_filter("Matricks Plugin", &["wasm", "mtx"])
-                            .pick_file() {
-                            None => {/* No file picked, so do nothing */}
+                            .pick_file()
+                        {
+                            None => { /* No file picked, so do nothing */ }
                             Some(path) => {
                                 self.start_plugin(path.clone());
                             }
@@ -76,19 +77,26 @@ impl SimulatorApp {
 
                 // Matrix configuration settings
                 ui.menu_button("Matrix", |ui| {
-                    ui.add(egui::Slider::new(&mut self.matrix_config.target_fps, 1.0..=60.0).text("FPS"));
+                    ui.add(
+                        egui::Slider::new(&mut self.matrix_config.target_fps, 1.0..=60.0)
+                            .text("FPS"),
+                    );
                     ui.add(egui::Slider::new(&mut self.matrix_config.width, 1..=128).text("Width"));
-                    ui.add(egui::Slider::new(&mut self.matrix_config.height, 1..=128).text("Height"));
+                    ui.add(
+                        egui::Slider::new(&mut self.matrix_config.height, 1..=128).text("Height"),
+                    );
                     if ui.button("Reload Matrix").clicked() {
                         // Attempt to pull the path from the current plugin thread struct
                         let path: Option<PathBuf> = match &self.plugin_thread {
                             None => None,
-                            Some(plugin_thread) => Some(plugin_thread.path.clone())
+                            Some(plugin_thread) => Some(plugin_thread.path.clone()),
                         };
 
                         // If we were able to get a path, launch a new plugin with it
                         match path {
-                            None => {self.set_status_msg("No active plugin, reload will be ignored".to_string())}
+                            None => self.set_status_msg(
+                                "No active plugin, reload will be ignored".to_string(),
+                            ),
                             Some(path) => {
                                 self.start_plugin(path);
                                 self.set_status_msg("Plugin reloaded.".to_string());
@@ -122,10 +130,10 @@ impl SimulatorApp {
                 response.rect.width() / self.current_matrix_config.width as f32, // Sidelength from width
                 response.rect.height() / self.current_matrix_config.height as f32, // Sidelength from height
             ]
-                .iter()
-                .min_by(|a, b| a.partial_cmp(b).unwrap()) // Pick smaller of the two
-                .unwrap()
-                .clone(); // It's still a &f32, so clone it
+            .iter()
+            .min_by(|a, b| a.partial_cmp(b).unwrap()) // Pick smaller of the two
+            .unwrap()
+            .clone(); // It's still a &f32, so clone it
 
             // Setup the LED roundness parameter
             let rounding = if self.display_settings.round_leds {
@@ -188,10 +196,16 @@ impl SimulatorApp {
         self.last_update = Default::default();
 
         // Start a new plugin thread
-        self.plugin_thread = Some(start_plugin_thread(path.clone(), self.current_matrix_config.clone()));
+        self.plugin_thread = Some(start_plugin_thread(
+            path.clone(),
+            self.current_matrix_config.clone(),
+        ));
 
         // Tell user that a new plugin was started
-        self.set_status_msg(format!("Plugin started with path {}", path.to_str().unwrap()));
+        self.set_status_msg(format!(
+            "Plugin started with path {}",
+            path.to_str().unwrap()
+        ));
     }
 
     /// Receive an update from the currently active plugin, if there is one
@@ -206,7 +220,7 @@ impl SimulatorApp {
 
                         // If there are logs from the plugin, display them on the status bar
                         match &self.last_update.log_message {
-                            None => {/* No logs, so do nothing */}
+                            None => { /* No logs, so do nothing */ }
                             Some(logs) => {
                                 let mut combined_logs = String::new();
                                 for log in logs {

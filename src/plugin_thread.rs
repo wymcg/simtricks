@@ -24,18 +24,11 @@ pub fn start_plugin_thread(path: PathBuf, mat_config: MatrixConfiguration) -> Pl
     PluginThread {
         path: path.clone(),
         join_handle: thread::spawn(|| plugin_thread(path, mat_config, update_tx)),
-        channels: PluginThreadChannels {
-            update_rx,
-        },
+        channels: PluginThreadChannels { update_rx },
     }
 }
 
-fn plugin_thread(
-    path: PathBuf,
-    mat_config: MatrixConfiguration,
-    update_tx: Sender<PluginUpdate>,
-) {
-
+fn plugin_thread(path: PathBuf, mat_config: MatrixConfiguration, update_tx: Sender<PluginUpdate>) {
     // Calculate ms per frame
     let target_frame_time_ms =
         Duration::from_nanos((1_000_000_000.0 / mat_config.target_fps).round() as u64);
@@ -78,7 +71,7 @@ fn plugin_thread(
 
             // Send the update to the GUI
             match update_tx.send(update) {
-                Ok(_) => {/* Update sent without issue, no further action required */}
+                Ok(_) => { /* Update sent without issue, no further action required */ }
                 Err(_) => {
                     /* Assume the main thread has started a new plugin thread and stop this thread */
                     break 'update_loop;

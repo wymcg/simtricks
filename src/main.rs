@@ -1,8 +1,8 @@
-mod simulator_app;
 mod plugin_thread;
+mod simulator_app;
 
-use eframe::{egui, NativeOptions};
 use crate::simulator_app::SimulatorApp;
+use eframe::{egui, NativeOptions};
 
 const WINDOW_WIDTH_INITIAL: f32 = 800.0;
 const WINDOW_HEIGHT_INITIAL: f32 = 850.0;
@@ -18,6 +18,7 @@ fn main() {
     eframe::run_native(
         "Simtricks",
         options,
-        Box::new(|_cc| Box::<SimulatorApp>::default())
-    ).expect("Unable to start egui app!");
+        Box::new(|_cc| Box::<SimulatorApp>::default()),
+    )
+    .expect("Unable to start egui app!");
 }
