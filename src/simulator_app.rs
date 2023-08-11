@@ -203,6 +203,19 @@ impl SimulatorApp {
                     Ok(update) => {
                         // Save this update
                         self.last_update = update;
+
+                        // If there are logs from the plugin, display them on the status bar
+                        match &self.last_update.log_message {
+                            None => {/* No logs, so do nothing */}
+                            Some(logs) => {
+                                let mut combined_logs = String::new();
+                                for log in logs {
+                                    combined_logs.push_str(log);
+                                    combined_logs.push('\n');
+                                }
+                                self.set_status_msg(combined_logs);
+                            }
+                        }
                     }
                     Err(_) => { /* No new update, so do nothing */ }
                 }
