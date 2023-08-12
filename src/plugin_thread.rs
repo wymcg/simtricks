@@ -1,8 +1,8 @@
-use extism::Plugin;
+use extism::{Error, Plugin};
 use matricks_plugin::{MatrixConfiguration, PluginUpdate};
 use serde_json::from_str;
 use std::path::PathBuf;
-use std::str::from_utf8;
+use std::str::{from_utf8, Utf8Error};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -16,19 +16,26 @@ pub struct PluginThread {
 
 pub struct PluginThreadChannels {
     pub update_rx: Receiver<PluginUpdate>,
+    pub log_rx: Receiver<String>,
 }
 
 pub fn start_plugin_thread(path: PathBuf, mat_config: MatrixConfiguration) -> PluginThread {
     let (update_tx, update_rx) = channel::<PluginUpdate>();
+    let (log_tx, log_rx) = channel::<String>();
 
     PluginThread {
         path: path.clone(),
-        join_handle: thread::spawn(|| plugin_thread(path, mat_config, update_tx)),
-        channels: PluginThreadChannels { update_rx },
+        join_handle: thread::spawn(|| plugin_thread(path, mat_config, update_tx, log_tx)),
+        channels: PluginThreadChannels { update_rx, log_rx },
     }
 }
 
-fn plugin_thread(path: PathBuf, mat_config: MatrixConfiguration, update_tx: Sender<PluginUpdate>) {
+fn plugin_thread(
+    path: PathBuf,
+    mat_config: MatrixConfiguration,
+    update_tx: Sender<PluginUpdate>,
+    log_tx: Sender<String>,
+) {
     // Calculate ms per frame
     let target_frame_time_ms =
         Duration::from_nanos((1_000_000_000.0 / mat_config.target_fps).round() as u64);
@@ -46,9 +53,14 @@ fn plugin_thread(path: PathBuf, mat_config: MatrixConfiguration, update_tx: Send
     // Make a new instance of the plugin
     let mut plugin = Plugin::new(&context, wasm, [], true).expect("Unable to instantiate plugin");
 
-    let _setup_result = plugin
-        .call("setup", &mat_config_string)
-        .expect("Unable to call setup!");
+    match plugin.call("setup", &mat_config_string) {
+        Ok(_) => { /* Setup call ran without issue, no further action needed */ }
+        Err(_) => {
+            log_tx
+                .send("Unable to run setup function!".to_string())
+                .expect("Could not send log to main thread!");
+        }
+    };
 
     let mut last_frame_time = Instant::now();
 
@@ -58,13 +70,32 @@ fn plugin_thread(path: PathBuf, mat_config: MatrixConfiguration, update_tx: Send
             // Reset the last frame time
             last_frame_time = Instant::now();
 
-            // Generate a frame
-            let update_utf8 = plugin
-                .call("update", "")
-                .expect("Unable to call update function");
-            let update_str = from_utf8(update_utf8).expect("Unable to convert to str from utf8!");
-            let update =
-                from_str::<PluginUpdate>(update_str).expect("Unable to deserialize update!");
+            // Get an update from the plugin
+            let update_utf8 = match plugin.call("update", "") {
+                Ok(utf8) => utf8,
+                Err(_) => {
+                    log_tx.send("Unable to call update function! No further updates will be requested from this thread.".to_string()).expect("Could not send log to main thread!");
+                    break 'update_loop;
+                }
+            };
+
+            // Convert UTF8 update to a string
+            let update_str = match from_utf8(update_utf8) {
+                Ok(str) => str,
+                Err(_) => {
+                    log_tx.send("Unable to convert UTF-8 response from the plugin! No further updates will be requested from this thread.".to_string()).expect("Could not send log to main thread!");
+                    break 'update_loop;
+                }
+            };
+
+            // Convert string update to the plugin update struct
+            let update = match from_str::<PluginUpdate>(update_str) {
+                Ok(plugin_update) => plugin_update,
+                Err(_) => {
+                    log_tx.send("Malformed plugin update! No further updates will be requested from this thread.".to_string()).expect("Could not send log to main thread!");
+                    break 'update_loop;
+                }
+            };
 
             // Check if we should stop after this update
             let should_halt = update.done;

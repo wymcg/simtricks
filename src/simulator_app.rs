@@ -5,6 +5,7 @@ use eframe::emath::RectTransform;
 use eframe::{egui, App, Frame};
 use matricks_plugin::{MatrixConfiguration, PluginUpdate};
 use std::path::PathBuf;
+use std::sync::mpsc::TryRecvError;
 
 const VERSION: Option<&str> = option_env!("CARGO_PKG_VERSION");
 
@@ -45,6 +46,7 @@ impl App for SimulatorApp {
     fn update(&mut self, ctx: &Context, frame: &mut Frame) {
         // Non-gui tasks
         self.check_for_update(ctx);
+        self.check_for_log();
 
         // Render the GUI
         self.render_menu_bar(ctx, frame);
@@ -243,5 +245,28 @@ impl SimulatorApp {
                 self.set_status_msg(combined_logs);
             }
         }
+    }
+
+    /// Check for logs from the plugin thread
+    fn check_for_log(&mut self) {
+        let plugin_thread = match &self.plugin_thread {
+            None => {
+                // No active plugin, so return
+                return;
+            }
+            Some(pt) => pt
+        };
+
+        let log = match plugin_thread.channels.log_rx.try_recv() {
+            Ok(log) => log,
+            Err(_) => {
+                // No log, so return
+                return;
+            }
+        };
+
+        self.set_status_msg(log);
+
+
     }
 }
