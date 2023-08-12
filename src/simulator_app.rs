@@ -46,6 +46,7 @@ impl App for SimulatorApp {
         // Non-gui tasks
         self.check_for_update(ctx);
         self.check_for_log();
+        self.check_for_halt();
 
         // Render the GUI
         self.render_menu_bar(ctx, frame);
@@ -188,7 +189,15 @@ impl SimulatorApp {
     /// Render the status message at the bottom of the screen
     fn render_status_bar(&mut self, ctx: &Context, _frame: &mut Frame) {
         egui::TopBottomPanel::bottom("status_msg").show(ctx, |ui| {
-            ui.label(self.status_msg.clone());
+            ui.horizontal(|ui| {
+                // Display the current status message
+                ui.label(self.status_msg.clone());
+
+                // Show a loading spinner if there is an active plugin, but not a plugin update
+                if self.last_update.is_none() && self.plugin_thread.is_some() {
+                    ui.add(egui::Spinner::new());
+                }
+            });
         });
     }
 
@@ -275,6 +284,22 @@ impl SimulatorApp {
 
         self.set_status_msg(log);
 
+    }
 
+    /// Check if the plugin thread has halted or not
+    fn check_for_halt(&mut self) {
+        let plugin_thread = match &self.plugin_thread {
+            None => {
+                // No active thread, so return
+                return;
+            }
+            Some(pt) => pt
+        };
+
+        // If we receive anything over the halt channel, the thread has stopped (or is stopping)
+        if plugin_thread.channels.is_done_rx.try_recv().is_ok() {
+            // Clear the current plugin
+            self.plugin_thread = None;
+        }
     }
 }

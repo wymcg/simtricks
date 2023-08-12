@@ -17,16 +17,18 @@ pub struct PluginThread {
 pub struct PluginThreadChannels {
     pub update_rx: Receiver<PluginUpdate>,
     pub log_rx: Receiver<String>,
+    pub is_done_rx: Receiver<()>,
 }
 
 pub fn start_plugin_thread(path: PathBuf, mat_config: MatrixConfiguration) -> PluginThread {
     let (update_tx, update_rx) = channel::<PluginUpdate>();
     let (log_tx, log_rx) = channel::<String>();
+    let (is_done_tx, is_done_rx) = channel::<()>();
 
     PluginThread {
         path: path.clone(),
-        join_handle: thread::spawn(|| plugin_thread(path, mat_config, update_tx, log_tx)),
-        channels: PluginThreadChannels { update_rx, log_rx },
+        join_handle: thread::spawn(|| plugin_thread(path, mat_config, update_tx, log_tx, is_done_tx)),
+        channels: PluginThreadChannels { update_rx, log_rx, is_done_rx },
     }
 }
 
@@ -35,6 +37,7 @@ fn plugin_thread(
     mat_config: MatrixConfiguration,
     update_tx: Sender<PluginUpdate>,
     log_tx: Sender<String>,
+    is_done_tx: Sender<()>,
 ) {
     // Calculate ms per frame
     let target_frame_time_ms =
@@ -75,6 +78,7 @@ fn plugin_thread(
                 Ok(utf8) => utf8,
                 Err(_) => {
                     log_tx.send("Unable to call update function! No further updates will be requested from this thread.".to_string()).expect("Could not send log to main thread!");
+                    is_done_tx.send(()).expect("Unable send done signal to main thread!");
                     break 'update_loop;
                 }
             };
@@ -84,6 +88,7 @@ fn plugin_thread(
                 Ok(str) => str,
                 Err(_) => {
                     log_tx.send("Unable to convert UTF-8 response from the plugin! No further updates will be requested from this thread.".to_string()).expect("Could not send log to main thread!");
+                    is_done_tx.send(()).expect("Unable send done signal to main thread!");
                     break 'update_loop;
                 }
             };
@@ -93,6 +98,7 @@ fn plugin_thread(
                 Ok(plugin_update) => plugin_update,
                 Err(_) => {
                     log_tx.send("Malformed plugin update! No further updates will be requested from this thread.".to_string()).expect("Could not send log to main thread!");
+                    is_done_tx.send(()).expect("Unable send done signal to main thread!");
                     break 'update_loop;
                 }
             };
@@ -111,6 +117,7 @@ fn plugin_thread(
 
             // If the plugin requested to stop, then stop
             if should_halt {
+                is_done_tx.send(()).expect("Unable send done signal to main thread!");
                 break 'update_loop;
             }
         }
