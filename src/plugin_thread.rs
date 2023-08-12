@@ -1,8 +1,8 @@
-use extism::{Error, Plugin};
+use extism::Plugin;
 use matricks_plugin::{MatrixConfiguration, PluginUpdate};
 use serde_json::from_str;
 use std::path::PathBuf;
-use std::str::{from_utf8, Utf8Error};
+use std::str::from_utf8;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};

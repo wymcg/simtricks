@@ -5,7 +5,6 @@ use eframe::emath::RectTransform;
 use eframe::{egui, App, Frame};
 use matricks_plugin::{MatrixConfiguration, PluginUpdate};
 use std::path::PathBuf;
-use std::sync::mpsc::TryRecvError;
 
 const VERSION: Option<&str> = option_env!("CARGO_PKG_VERSION");
 
@@ -18,7 +17,7 @@ pub struct SimulatorApp {
     matrix_config: MatrixConfiguration,
     current_matrix_config: MatrixConfiguration,
     status_msg: String,
-    last_update: PluginUpdate,
+    last_update: Option<PluginUpdate>,
     display_settings: DisplaySettings,
 }
 
@@ -36,7 +35,7 @@ impl Default for SimulatorApp {
             },
             current_matrix_config: MatrixConfiguration::default(),
             status_msg: format!("Welcome to Simtricks v{}!", VERSION.unwrap_or("unknown")),
-            last_update: PluginUpdate::default(),
+            last_update: None,
             display_settings: DisplaySettings { round_leds: false },
         }
     }
@@ -117,6 +116,15 @@ impl SimulatorApp {
 
     /// Render the simulated LED matrix
     fn render_matrix(&mut self, ctx: &Context, _frame: &mut Frame) {
+        // Get the last update, if there was one
+        let last_update = match &self.last_update {
+            None => {
+                // No last update, so return
+                return;
+            }
+            Some(update) => update
+        };
+
         egui::CentralPanel::default().show(ctx, |ui| {
             // Allocate our painter
             let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click());
@@ -145,18 +153,18 @@ impl SimulatorApp {
             };
 
             // Draw the LEDs if the plugin update state is consistent with the current matrix config
-            if self.last_update.state.len() > 0
-                && self.last_update.state.len() == self.current_matrix_config.height
-                && self.last_update.state[0].len() == self.current_matrix_config.width
+            if last_update.state.len() > 0
+                && last_update.state.len() == self.current_matrix_config.height
+                && last_update.state[0].len() == self.current_matrix_config.width
             {
                 for y in 0..self.current_matrix_config.height {
                     for x in 0..self.current_matrix_config.width {
                         // Grab the color of this LED from the last update
                         let led_color = egui::Color32::from_rgba_premultiplied(
-                            self.last_update.state[y][x][2],
-                            self.last_update.state[y][x][1],
-                            self.last_update.state[y][x][0],
-                            self.last_update.state[y][x][3],
+                            last_update.state[y][x][2],
+                            last_update.state[y][x][1],
+                            last_update.state[y][x][0],
+                            last_update.state[y][x][3],
                         );
 
                         // Draw the LED
@@ -195,7 +203,7 @@ impl SimulatorApp {
         self.current_matrix_config = self.matrix_config.clone();
 
         // Clear the last plugin update
-        self.last_update = Default::default();
+        self.last_update = None;
 
         // Start a new plugin thread
         self.plugin_thread = Some(start_plugin_thread(
@@ -227,11 +235,8 @@ impl SimulatorApp {
             Err(_) => return
         };
 
-        // Save this update
-        self.last_update = update;
-
         // If there are logs from the plugin, display them on the status bar
-        match &self.last_update.log_message {
+        match &update.log_message {
             None => { /* No logs, so do nothing */ }
             Some(logs) => {
                 // Combine the logs into a single string
@@ -245,6 +250,9 @@ impl SimulatorApp {
                 self.set_status_msg(combined_logs);
             }
         }
+
+        // Save this update
+        self.last_update = Some(update);
     }
 
     /// Check for logs from the plugin thread
