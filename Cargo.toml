@@ -2,6 +2,14 @@
 name = "simtricks"
 version = "0.2.0"
 edition = "2021"
+authors = ["Will McGloughlin <willem.mcg@gmail.com>"]
+license = "MIT"
+description = "A tool to run Matricks plugins on non-Raspberry Pi devices"
+readme = "README.md"
+homepage = "https://github.com/wymcg/simtricks"
+repository = "https://github.com/wymcg/simtricks"
+keywords = ["ws281x", "raspberrypi", "wasm"]
+categories = ["development-tools"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
