@@ -150,7 +150,7 @@ impl SimulatorApp {
             let rounding = if self.display_settings.round_leds {
                 Rounding::same(sidelength)
             } else {
-                Rounding::none()
+                Rounding::ZERO
             };
 
             // Draw the LEDs if the plugin update state is consistent with the current matrix config
