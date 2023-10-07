@@ -20,14 +20,14 @@ pub struct PluginThreadChannels {
     pub is_done_rx: Receiver<()>,
 }
 
-pub fn start_plugin_thread(path: PathBuf, mat_config: MatrixConfiguration) -> PluginThread {
+pub fn start_plugin_thread(path: PathBuf, mat_config: MatrixConfiguration, allowed_hosts: Vec<String>, path_mappings: Vec<(PathBuf, PathBuf)>) -> PluginThread {
     let (update_tx, update_rx) = channel::<PluginUpdate>();
     let (log_tx, log_rx) = channel::<String>();
     let (is_done_tx, is_done_rx) = channel::<()>();
 
     PluginThread {
         path: path.clone(),
-        join_handle: thread::spawn(|| plugin_thread(path, mat_config, update_tx, log_tx, is_done_tx)),
+        join_handle: thread::spawn(|| plugin_thread(path, mat_config, allowed_hosts, path_mappings, update_tx, log_tx, is_done_tx)),
         channels: PluginThreadChannels { update_rx, log_rx, is_done_rx },
     }
 }
@@ -35,6 +35,8 @@ pub fn start_plugin_thread(path: PathBuf, mat_config: MatrixConfiguration) -> Pl
 fn plugin_thread(
     path: PathBuf,
     mat_config: MatrixConfiguration,
+    allowed_hosts: Vec<String>,
+    path_mappings: Vec<(PathBuf, PathBuf)>,
     update_tx: Sender<PluginUpdate>,
     log_tx: Sender<String>,
     is_done_tx: Sender<()>,
@@ -53,8 +55,13 @@ fn plugin_thread(
     // Make new context for plugin
     let context = extism::Context::new();
 
+    // Make a new manifest for the plugin
+    let manifest = extism::Manifest::new([extism::manifest::Wasm::data(wasm)])
+        .with_allowed_hosts(allowed_hosts.into_iter())
+        .with_allowed_paths(path_mappings.into_iter());
+
     // Make a new instance of the plugin
-    let mut plugin = Plugin::new(&context, wasm, [], true).expect("Unable to instantiate plugin");
+    let mut plugin = Plugin::new_with_manifest(&context, &manifest, [], true).expect("Unable to instantiate plugin!");
 
     match plugin.call("setup", &mat_config_string) {
         Ok(_) => { /* Setup call ran without issue, no further action needed */ }

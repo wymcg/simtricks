@@ -12,6 +12,13 @@ pub struct DisplaySettings {
     pub round_leds: bool,
 }
 
+pub struct PluginSettings {
+    pub new_allowed_host: String,
+    pub new_path_mapping: (String, String),
+    pub allowed_hosts: Vec<String>,
+    pub path_mappings: Vec<(PathBuf, PathBuf)>,
+}
+
 pub struct SimulatorApp {
     plugin_thread: Option<PluginThread>,
     matrix_config: MatrixConfiguration,
@@ -19,6 +26,7 @@ pub struct SimulatorApp {
     status_msg: String,
     last_update: Option<PluginUpdate>,
     display_settings: DisplaySettings,
+    plugin_settings: PluginSettings,
 }
 
 impl Default for SimulatorApp {
@@ -37,6 +45,12 @@ impl Default for SimulatorApp {
             status_msg: format!("Welcome to Simtricks v{}!", VERSION.unwrap_or("unknown")),
             last_update: None,
             display_settings: DisplaySettings { round_leds: false },
+            plugin_settings: PluginSettings {
+                new_allowed_host: String::new(),
+                new_path_mapping: (String::new(), String::new()),
+                allowed_hosts: vec![],
+                path_mappings: vec![],
+            }
         }
     }
 }
@@ -111,6 +125,77 @@ impl SimulatorApp {
                 ui.menu_button("Display", |ui| {
                     ui.checkbox(&mut self.display_settings.round_leds, "Round LEDs");
                 });
+
+                // Plugin settings
+                ui.menu_button("Plugin", |ui| {
+                    ui.menu_button("Allowed Hosts",  |ui| {
+                        // Add a button for each allowed host
+                        if self.plugin_settings.allowed_hosts.is_empty() {
+                            ui.label("No allowed hosts");
+                        } else {
+                            // For every allowed host, add a remove button
+                            for (allowed_host_index, allowed_host) in self.plugin_settings.allowed_hosts.clone().iter().enumerate() {
+                                ui.menu_button(allowed_host, |ui| {
+                                    if ui.button("Remove").clicked() {
+                                        self.plugin_settings.allowed_hosts.remove(allowed_host_index);
+                                    }
+                                });
+                            }
+                        }
+                        ui.separator();
+                        ui.menu_button("Add Allowed Host", |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label("Host:");
+                                ui.text_edit_singleline(&mut self.plugin_settings.new_allowed_host);
+                            });
+                            if ui.button("Save host").clicked() {
+                                // Don't add the mapping if it already exists in the list
+                                if !self.plugin_settings.allowed_hosts.contains(&self.plugin_settings.new_allowed_host) {
+                                    self.plugin_settings.allowed_hosts.push(self.plugin_settings.new_allowed_host.clone());
+                                }
+                                self.plugin_settings.new_allowed_host = String::new();
+                            }
+                        });
+                    });
+                    ui.menu_button("Mapped Paths",  |ui| {
+                        // Add a button for each allowed host
+                        if self.plugin_settings.path_mappings.is_empty() {
+                            ui.label("No path mappings");
+                        } else {
+                            // For every path mapping, add a remove button
+                            for (path_mapping_index, path_mapping) in self.plugin_settings.path_mappings.clone().iter().enumerate() {
+                                let mapping_string = format!("{} > {}", path_mapping.0.to_str().unwrap(), path_mapping.1.to_str().unwrap());
+                                ui.menu_button(mapping_string, |ui| {
+                                    if ui.button("Remove").clicked() {
+                                        self.plugin_settings.path_mappings.remove(path_mapping_index);
+                                    }
+                                });
+                            }
+                        }
+                        ui.separator();
+                        ui.menu_button("Add Path Mapping", |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label("Local Path:");
+                                ui.text_edit_singleline(&mut self.plugin_settings.new_path_mapping.0);
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Plugin Path:");
+                                ui.text_edit_singleline(&mut self.plugin_settings.new_path_mapping.1);
+                            });
+                            if ui.button("Save mapping").clicked() {
+                                // Make path buffers from the strings
+                                let new_mapping = (PathBuf::from(&self.plugin_settings.new_path_mapping.0), PathBuf::from(&self.plugin_settings.new_path_mapping.1));
+
+                                // Only add the mapping if it doesn't already exist
+                                if !self.plugin_settings.path_mappings.contains(&new_mapping) {
+                                    self.plugin_settings.path_mappings.push(new_mapping);
+                                }
+
+                                self.plugin_settings.new_path_mapping = (String::new(), String::new());
+                            }
+                        });
+                    });
+                })
             });
         });
     }
@@ -218,6 +303,8 @@ impl SimulatorApp {
         self.plugin_thread = Some(start_plugin_thread(
             path.clone(),
             self.current_matrix_config.clone(),
+            self.plugin_settings.allowed_hosts.clone(),
+            self.plugin_settings.path_mappings.clone()
         ));
 
         // Tell user that a new plugin was started
