@@ -3,8 +3,8 @@ use chrono::prelude::*;
 use eframe::egui::{Context, Pos2, Rect, Rounding, Sense, Vec2};
 use eframe::emath::RectTransform;
 use eframe::{egui, App, Frame};
-use matricks_plugin::{MatrixConfiguration, PluginUpdate};
 use std::path::PathBuf;
+use crate::matrix_config::MatrixConfiguration;
 
 const VERSION: Option<&str> = option_env!("CARGO_PKG_VERSION");
 
@@ -24,7 +24,7 @@ pub struct SimulatorApp {
     matrix_config: MatrixConfiguration,
     current_matrix_config: MatrixConfiguration,
     status_msg: String,
-    last_update: Option<PluginUpdate>,
+    last_update: Option<Vec<Vec<[u8; 4]>>>,
     display_settings: DisplaySettings,
     plugin_settings: PluginSettings,
 }
@@ -33,14 +33,7 @@ impl Default for SimulatorApp {
     fn default() -> Self {
         Self {
             plugin_thread: None,
-            matrix_config: MatrixConfiguration {
-                width: 12,
-                height: 12,
-                target_fps: 30.0,
-                serpentine: false,
-                magnification: 1.0,
-                brightness: u8::MAX,
-            },
+            matrix_config: MatrixConfiguration::default(),
             current_matrix_config: MatrixConfiguration::default(),
             status_msg: format!("Welcome to Simtricks v{}!", VERSION.unwrap_or("unknown")),
             last_update: None,
@@ -239,18 +232,18 @@ impl SimulatorApp {
             };
 
             // Draw the LEDs if the plugin update state is consistent with the current matrix config
-            if last_update.state.len() > 0
-                && last_update.state.len() == self.current_matrix_config.height
-                && last_update.state[0].len() == self.current_matrix_config.width
+            if last_update.len() > 0
+                && last_update.len() == self.current_matrix_config.height
+                && last_update[0].len() == self.current_matrix_config.width
             {
                 for y in 0..self.current_matrix_config.height {
                     for x in 0..self.current_matrix_config.width {
                         // Grab the color of this LED from the last update
                         let led_color = egui::Color32::from_rgba_premultiplied(
-                            last_update.state[y][x][2],
-                            last_update.state[y][x][1],
-                            last_update.state[y][x][0],
-                            last_update.state[y][x][3],
+                            last_update[y][x][2],
+                            last_update[y][x][1],
+                            last_update[y][x][0],
+                            last_update[y][x][3],
                         );
 
                         // Draw the LED
@@ -330,22 +323,6 @@ impl SimulatorApp {
             Ok(update) => update,
             Err(_) => return
         };
-
-        // If there are logs from the plugin, display them on the status bar
-        match &update.log_message {
-            None => { /* No logs, so do nothing */ }
-            Some(logs) => {
-                // Combine the logs into a single string
-                let mut combined_logs = String::new();
-                for log in logs {
-                    combined_logs.push_str(log);
-                    combined_logs.push('\n');
-                }
-
-                // Push the all logs to the status bar as a single string
-                self.set_status_msg(combined_logs);
-            }
-        }
 
         // Save this update
         self.last_update = Some(update);

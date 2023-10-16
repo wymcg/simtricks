@@ -1,5 +1,6 @@
 mod plugin_thread;
 mod simulator_app;
+mod matrix_config;
 
 use crate::simulator_app::SimulatorApp;
 use eframe::{egui, NativeOptions};

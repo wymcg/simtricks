@@ -1,5 +1,4 @@
-use extism::Plugin;
-use matricks_plugin::{MatrixConfiguration, PluginUpdate};
+use extism::{CurrentPlugin, Function, Plugin, UserData, Val, ValType};
 use serde_json::from_str;
 use std::path::PathBuf;
 use std::str::from_utf8;
@@ -7,6 +6,8 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use std::{fs, thread};
+use std::collections::BTreeMap;
+use crate::matrix_config::MatrixConfiguration;
 
 pub struct PluginThread {
     pub join_handle: JoinHandle<()>,
@@ -15,13 +16,13 @@ pub struct PluginThread {
 }
 
 pub struct PluginThreadChannels {
-    pub update_rx: Receiver<PluginUpdate>,
+    pub update_rx: Receiver<Vec<Vec<[u8; 4]>>>,
     pub log_rx: Receiver<String>,
     pub is_done_rx: Receiver<()>,
 }
 
 pub fn start_plugin_thread(path: PathBuf, mat_config: MatrixConfiguration, allowed_hosts: Vec<String>, path_mappings: Vec<(PathBuf, PathBuf)>) -> PluginThread {
-    let (update_tx, update_rx) = channel::<PluginUpdate>();
+    let (update_tx, update_rx) = channel::<Vec<Vec<[u8; 4]>>>();
     let (log_tx, log_rx) = channel::<String>();
     let (is_done_tx, is_done_rx) = channel::<()>();
 
@@ -37,7 +38,7 @@ fn plugin_thread(
     mat_config: MatrixConfiguration,
     allowed_hosts: Vec<String>,
     path_mappings: Vec<(PathBuf, PathBuf)>,
-    update_tx: Sender<PluginUpdate>,
+    update_tx: Sender<Vec<Vec<[u8; 4]>>>,
     log_tx: Sender<String>,
     is_done_tx: Sender<()>,
 ) {
@@ -45,9 +46,71 @@ fn plugin_thread(
     let target_frame_time_ms =
         Duration::from_nanos((1_000_000_000.0 / mat_config.target_fps).round() as u64);
 
-    // Prepare the matrix config string
-    let mat_config_string =
-        serde_json::to_string(&mat_config).expect("Unable to make matrix config string");
+    // Create the config
+    let mut matricks_config: BTreeMap<String, Option<String>> = BTreeMap::new();
+    matricks_config.insert(
+        String::from("width"),
+        Some(format!("{}", mat_config.width)),
+    );
+    matricks_config.insert(
+        String::from("height"),
+        Some(format!("{}", mat_config.height)),
+    );
+    matricks_config.insert(
+        String::from("target_fps"),
+        Some(format!("{}", mat_config.target_fps)),
+    );
+    matricks_config.insert(
+        String::from("serpentine"),
+        Some(format!("{}", false)),
+    );
+    matricks_config.insert(
+        String::from("brightness"),
+        Some(format!("{}", 255u8)),
+    );
+
+    let send_log_fn = |
+        _plugin: &mut CurrentPlugin, _inputs: &[Val], _outputs: &mut [Val], _user_data: UserData
+    | -> Result<(), extism::Error> {
+        // Not implemented!
+        Ok(())
+    };
+
+    // Setup the host functions
+    let plugin_debug_log_function = Function::new(
+        "matricks_debug",
+        [ValType::I64],
+        [],
+        None,
+        send_log_fn.clone(),
+    );
+    let plugin_info_log_function = Function::new(
+        "matricks_info",
+        [ValType::I64],
+        [],
+        None,
+        send_log_fn.clone(),
+    );
+    let plugin_warn_log_function = Function::new(
+        "matricks_warn",
+        [ValType::I64],
+        [],
+        None,
+        send_log_fn.clone(),
+    );
+    let plugin_error_log_function = Function::new(
+        "matricks_error",
+        [ValType::I64],
+        [],
+        None,
+        send_log_fn,
+    );
+    let plugin_functions = [
+        plugin_debug_log_function,
+        plugin_info_log_function,
+        plugin_warn_log_function,
+        plugin_error_log_function,
+    ];
 
     // Get the plugin data
     let wasm = fs::read(path).expect("Unable to load plugin data");
@@ -61,9 +124,10 @@ fn plugin_thread(
         .with_allowed_paths(path_mappings.into_iter());
 
     // Make a new instance of the plugin
-    let mut plugin = Plugin::new_with_manifest(&context, &manifest, [], true).expect("Unable to instantiate plugin!");
+    let plugin = Plugin::new_with_manifest(&context, &manifest, plugin_functions, true).expect("Unable to instantiate plugin!");
+    let mut plugin = plugin.with_config(&matricks_config).expect("Unable to apply config to plugin!");
 
-    match plugin.call("setup", &mat_config_string) {
+    match plugin.call("setup", "") {
         Ok(_) => { /* Setup call ran without issue, no further action needed */ }
         Err(_) => {
             log_tx
@@ -101,7 +165,7 @@ fn plugin_thread(
             };
 
             // Convert string update to the plugin update struct
-            let update = match from_str::<PluginUpdate>(update_str) {
+            let update = match from_str::<Option<Vec<Vec<[u8; 4]>>>>(update_str) {
                 Ok(plugin_update) => plugin_update,
                 Err(_) => {
                     log_tx.send("Malformed plugin update! No further updates will be requested from this thread.".to_string()).expect("Could not send log to main thread!");
@@ -110,22 +174,23 @@ fn plugin_thread(
                 }
             };
 
-            // Check if we should stop after this update
-            let should_halt = update.done;
-
-            // Send the update to the GUI
-            match update_tx.send(update) {
-                Ok(_) => { /* Update sent without issue, no further action required */ }
-                Err(_) => {
-                    /* Assume the main thread has started a new plugin thread and stop this thread */
+            // Decide what to do with this update
+            match update {
+                None => {
+                    // If the update is None (JSON 'null'), this plugin is done
+                    is_done_tx.send(()).expect("Unable to send done signal to main thread!");
                     break 'update_loop;
                 }
-            }
-
-            // If the plugin requested to stop, then stop
-            if should_halt {
-                is_done_tx.send(()).expect("Unable send done signal to main thread!");
-                break 'update_loop;
+                Some(update) => {
+                    // Send the update to the GUI
+                    match update_tx.send(update) {
+                        Ok(_) => { /* Update sent without issue, no further action required */ }
+                        Err(_) => {
+                            /* Assume the main thread has started a new plugin thread and stop this thread */
+                            break 'update_loop;
+                        }
+                    }
+                }
             }
         }
     }
