@@ -1,14 +1,16 @@
 use crate::plugin_logs;
 use eframe::egui::{Context, Pos2, Rect, Rounding, Sense, Vec2};
+use eframe::emath::RectTransform;
 use eframe::{egui, App, Frame};
 use extism::manifest::Wasm;
 use extism::{Function, Manifest, Plugin, ValType};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::fs::read;
 use std::path::PathBuf;
 use std::str::from_utf8;
 use std::time::{Duration, Instant};
-use eframe::emath::RectTransform;
+
+const N_INTERFRAME_DURS: usize = 5;
 
 /// A simulator for a single Matricks plugin
 pub(crate) struct Simulator<'a> {
@@ -29,6 +31,9 @@ pub(crate) struct Simulator<'a> {
 
     /// The amount of time to wait before requesting another frame from the plugin
     time_per_frame: Duration,
+
+    /// The amount of time between frames. Used for real framerate calculations
+    interframe_durations: VecDeque<Duration>,
 
     /// Request the next frame once the appropriate amount of time (`time_per_frame`) has elapsed
     autoplay: bool,
@@ -139,6 +144,7 @@ impl Simulator<'_> {
             fps,
             time_per_frame,
             time_at_last_frame: Instant::now(),
+            interframe_durations: VecDeque::from(vec![Duration::ZERO; N_INTERFRAME_DURS]),
             autoplay: true,
             freeze: false,
         })
@@ -208,8 +214,18 @@ impl Simulator<'_> {
             Some(state) => state,
         };
 
+        // Get the current instant
+        let now = Instant::now();
+
+        // If autoplay is on, capture the time between frames
+        if self.autoplay {
+            self.interframe_durations.pop_front();
+            self.interframe_durations
+                .push_back(now.duration_since(self.time_at_last_frame));
+        }
+
         // Reset the time at last frame
-        self.time_at_last_frame = Instant::now();
+        self.time_at_last_frame = now;
     }
 
     /// Freeze the simulator
@@ -237,10 +253,10 @@ impl Simulator<'_> {
                 response.rect.width() / self.matrix_dimensions.0 as f32, // Sidelength from width
                 response.rect.height() / self.matrix_dimensions.1 as f32, // Sidelength from height
             ]
-                .iter()
-                .min_by(|a, b| a.partial_cmp(b).unwrap()) // Pick smaller of the two
-                .unwrap()
-                .clone(); // It's still a &f32, so clone it
+            .iter()
+            .min_by(|a, b| a.partial_cmp(b).unwrap()) // Pick smaller of the two
+            .unwrap()
+            .clone(); // It's still a &f32, so clone it
 
             for y in 0..self.matrix_dimensions.1 {
                 for x in 0..self.matrix_dimensions.0 {
@@ -269,8 +285,8 @@ impl Simulator<'_> {
         });
     }
 
-    fn bottom_panel(&mut self, ctx: &Context) {
-        egui::TopBottomPanel::bottom("controls").show(ctx, |ui| {
+    fn top_panel(&mut self, ctx: &Context) {
+        egui::TopBottomPanel::top("controls").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 // Add autoplay toggle button
                 ui.set_enabled(!self.freeze);
@@ -297,7 +313,20 @@ impl Simulator<'_> {
                     // Move to the next frame if clicked
                     self.next_frame();
                 }
-            })
+            });
+        });
+    }
+
+    fn bottom_panel(&mut self, ctx: &Context) {
+        let real_fps: f32 = N_INTERFRAME_DURS as f32
+            / self
+                .interframe_durations
+                .iter()
+                .map(|dur| dur.as_secs_f32())
+                .sum::<f32>();
+
+        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
+            ui.label(format!("{real_fps:.2}/{}fps", self.fps));
         });
     }
 }
@@ -308,7 +337,7 @@ impl App for Simulator<'_> {
         egui_extras::install_image_loaders(ctx);
 
         // Force a repaint after the frame time has elapsed
-        ctx.request_repaint_after(self.time_per_frame);
+        ctx.request_repaint();
 
         // If autoplay is on, the frame time has elapsed, and the sim isn't frozen, go to the next frame
         if self.autoplay && self.frame_time_elapsed() && !self.freeze {
@@ -316,6 +345,7 @@ impl App for Simulator<'_> {
         }
 
         // Draw the GUI
+        self.top_panel(ctx);
         self.bottom_panel(ctx);
         self.matrix(ctx);
     }
