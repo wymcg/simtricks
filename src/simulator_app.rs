@@ -233,6 +233,14 @@ impl Simulator<'_> {
         log::info!("Freezing simulator.");
         self.freeze = true;
     }
+
+    /// Estimate real FPS
+    fn estimate_real_fps(&self) -> f32 {
+        N_INTERFRAME_DURS as f32 / (self.interframe_durations
+            .iter()
+            .map(|dur| dur.as_secs_f32())
+            .sum::<f32>())
+    }
 }
 
 /// GUI functions
@@ -318,15 +326,8 @@ impl Simulator<'_> {
     }
 
     fn bottom_panel(&mut self, ctx: &Context) {
-        let real_fps: f32 = N_INTERFRAME_DURS as f32
-            / self
-                .interframe_durations
-                .iter()
-                .map(|dur| dur.as_secs_f32())
-                .sum::<f32>();
-
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-            ui.label(format!("{real_fps:.2}/{}fps", self.fps));
+            ui.label(format!("{:.2}/{}fps", self.estimate_real_fps(), self.fps));
         });
     }
 }
