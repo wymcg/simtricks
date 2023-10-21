@@ -60,8 +60,8 @@ impl Simulator<'_> {
         allowed_hosts: Vec<String>,
         path_maps: Vec<(PathBuf, PathBuf)>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        // Determine number of milliseconds between each frame
-        let time_per_frame = Duration::from_nanos((1_000_000_000.0 / fps).round() as u64);
+        // Determine duration between each frame
+        let time_per_frame = Duration::from_secs_f64(1.0 / fps);
 
         // Pull WASM data from the given file
         let wasm_data = read(path)?;
@@ -336,7 +336,7 @@ impl App for Simulator<'_> {
         // Install image loaders, if they aren't already installed
         egui_extras::install_image_loaders(ctx);
 
-        // Force a repaint after the frame time has elapsed
+        // Force a repaint
         ctx.request_repaint();
 
         // If autoplay is on, the frame time has elapsed, and the sim isn't frozen, go to the next frame
