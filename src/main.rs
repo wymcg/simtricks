@@ -12,7 +12,8 @@ use simple_logger::SimpleLogger;
 use std::path::PathBuf;
 
 const VERSION: Option<&str> = option_env!("CARGO_PKG_VERSION");
-const DEFAULT_LOG_LEVEL: &str = "simtricks";
+const DEFAULT_SIMTRICKS_LOG_LEVEL: LevelFilter = LevelFilter::Info;
+const DEFAULT_MATRICKS_LOG_LEVEL: LevelFilter = LevelFilter::Debug;
 const WINDOW_WIDTH_INITIAL: f32 = 500.0;
 const WINDOW_HEIGHT_INITIAL: f32 = 550.0;
 
@@ -23,7 +24,8 @@ fn main() {
     // Start the logger
     SimpleLogger::new()
         .with_level(LevelFilter::Off)
-        .with_module_level(DEFAULT_LOG_LEVEL, LevelFilter::Debug)
+        .with_module_level("simtricks", DEFAULT_SIMTRICKS_LOG_LEVEL)
+        .with_module_level("matricks", DEFAULT_MATRICKS_LOG_LEVEL)
         .init()
         .expect("Unable to start logger!");
     log::info!("Starting Simtricks v{}", VERSION.unwrap_or("unknown"));
