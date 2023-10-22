@@ -204,7 +204,8 @@ impl Simulator {
     fn restart(&mut self) {
         // Clear the current frame
         {
-            *self.frame.lock().unwrap() = vec![vec![[0; 4]; self.matrix_dimensions.0]; self.matrix_dimensions.1];
+            *self.frame.lock().unwrap() =
+                vec![vec![[0; 4]; self.matrix_dimensions.0]; self.matrix_dimensions.1];
         }
 
         // Signal that the existing plugin thread should be stopped
@@ -225,7 +226,10 @@ impl Simulator {
             }
 
             // If 'N' or right arrow is pressed and autoplay is off, step to the next frame
-            if (input_state.consume_key(Modifiers::NONE, Key::N) || input_state.consume_key(Modifiers::NONE, Key::ArrowRight)) && !*self.autoplay.lock().unwrap() {
+            if (input_state.consume_key(Modifiers::NONE, Key::N)
+                || input_state.consume_key(Modifiers::NONE, Key::ArrowRight))
+                && !*self.autoplay.lock().unwrap()
+            {
                 self.step();
             }
 
@@ -292,31 +296,45 @@ impl Simulator {
     }
 
     fn top_panel(&mut self, ctx: &Context) {
-
         egui::TopBottomPanel::top("controls").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 // Add autoplay toggle button
-                if ui.add_enabled(!*self.freeze.lock().unwrap(), egui::ImageButton::new(if *self.autoplay.lock().unwrap() {
-                        egui::include_image!("../assets/pause.png")
-                    } else {
-                        egui::include_image!("../assets/play.png")
-                    })).on_hover_text("Play/pause plugin (space)")
+                if ui
+                    .add_enabled(
+                        !*self.freeze.lock().unwrap(),
+                        egui::ImageButton::new(if *self.autoplay.lock().unwrap() {
+                            egui::include_image!("../assets/pause.png")
+                        } else {
+                            egui::include_image!("../assets/play.png")
+                        }),
+                    )
+                    .on_hover_text("Play/pause plugin (space)")
                     .clicked()
                 {
                     self.toggle_autoplay();
                 };
 
                 // Add step button
-                if ui.add_enabled(!*self.autoplay.lock().unwrap() && !*self.freeze.lock().unwrap(), egui::ImageButton::new(egui::include_image!(
-                        "../assets/step.png"
-                    ))).on_hover_text("Step to next frame (N)")
+                if ui
+                    .add_enabled(
+                        !*self.autoplay.lock().unwrap() && !*self.freeze.lock().unwrap(),
+                        egui::ImageButton::new(egui::include_image!("../assets/step.png")),
+                    )
+                    .on_hover_text("Step to next frame (N)")
                     .clicked()
                 {
                     self.step();
                 }
 
                 // Add plugin restart button
-                if ui.add_enabled(true, egui::ImageButton::new(egui::include_image!("../assets/restart.png"))).on_hover_text("Restart plugin (R)").clicked() {
+                if ui
+                    .add_enabled(
+                        true,
+                        egui::ImageButton::new(egui::include_image!("../assets/restart.png")),
+                    )
+                    .on_hover_text("Restart plugin (R)")
+                    .clicked()
+                {
                     self.restart();
                 }
             });
