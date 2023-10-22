@@ -300,7 +300,7 @@ impl Simulator {
                         egui::include_image!("../assets/pause.png")
                     } else {
                         egui::include_image!("../assets/play.png")
-                    }))
+                    })).on_hover_text("Play/pause plugin (space)")
                     .clicked()
                 {
                     self.toggle_autoplay();
@@ -309,14 +309,14 @@ impl Simulator {
                 // Add step button
                 if ui.add_enabled(!*self.autoplay.lock().unwrap() && !*self.freeze.lock().unwrap(), egui::ImageButton::new(egui::include_image!(
                         "../assets/step.png"
-                    )))
+                    ))).on_hover_text("Step to next frame (N)")
                     .clicked()
                 {
                     self.step();
                 }
 
                 // Add plugin restart button
-                if ui.add_enabled(true, egui::ImageButton::new(egui::include_image!("../assets/restart.png"))).clicked() {
+                if ui.add_enabled(true, egui::ImageButton::new(egui::include_image!("../assets/restart.png"))).on_hover_text("Restart plugin (R)").clicked() {
                     self.restart();
                 }
             });
