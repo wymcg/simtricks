@@ -1,14 +1,15 @@
 mod clargs;
 mod plugin_logs;
+mod plugin_thread;
 mod simulator_app;
 
 use crate::simulator_app::Simulator;
 use clap::Parser;
+use eframe::egui::Visuals;
 use eframe::{egui, NativeOptions};
 use log::LevelFilter;
 use simple_logger::SimpleLogger;
 use std::path::PathBuf;
-use eframe::egui::Visuals;
 
 const VERSION: Option<&str> = option_env!("CARGO_PKG_VERSION");
 const DEFAULT_LOG_LEVEL: &str = "simtricks";
@@ -59,10 +60,15 @@ fn main() {
     };
 
     // Start the simulator
-    match eframe::run_native("Simtricks", options, Box::new(|cc| {
-        cc.egui_ctx.style_mut(|style| style.visuals = Visuals::dark());
-        Box::new(simulator)
-    })) {
+    match eframe::run_native(
+        "Simtricks",
+        options,
+        Box::new(|cc| {
+            cc.egui_ctx
+                .style_mut(|style| style.visuals = Visuals::dark());
+            Box::new(simulator)
+        }),
+    ) {
         Ok(_) => {}
         Err(e) => {
             log::error!("Failed to start simulator.");

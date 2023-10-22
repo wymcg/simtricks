@@ -17,7 +17,7 @@ pub(crate) struct SimtricksArgs {
 
     /// Number of frames per second at which to simulate the matrix
     #[arg(short, long, default_value = "30")]
-    pub fps: f64,
+    pub fps: f32,
 
     /// Add a host that the plugin may connect to
     #[arg(long)]
