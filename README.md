@@ -14,5 +14,6 @@ Simtricks is run from the command line. At a minimum, you must provide a plugin 
 ```
 simtricks --path <PATH_TO_PLUGIN> --width <WIDTH> --height <HEIGHT>
 ```
+Run `simtricks -h` for a complete list of options.
 
 For a list of examples to try, check out the Matricks [example plugin](https://github.com/wymcg/matricks/tree/main/examples) page.
