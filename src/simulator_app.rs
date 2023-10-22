@@ -1,6 +1,6 @@
 use crate::plugin_logs;
 use crate::plugin_thread::plugin_thread;
-use eframe::egui::{Context, Pos2, Rect, Rounding, Sense, Vec2};
+use eframe::egui::{Context, Key, Modifiers, Pos2, Rect, Rounding, Sense, Vec2};
 use eframe::emath::RectTransform;
 use eframe::{egui, App, Frame};
 use extism::manifest::Wasm;
@@ -185,6 +185,58 @@ impl Simulator {
     }
 }
 
+/// Control functions
+impl Simulator {
+    /// Play/pause the plugin
+    fn toggle_autoplay(&mut self) {
+        let mut autoplay = self.autoplay.lock().unwrap();
+        *autoplay = !*autoplay;
+    }
+
+    /// Go to the next frame
+    fn step(&mut self) {
+        // Tell the plugin update thread to generate a new frame
+        let mut generate_frame_flag = self.generate_frame.lock().unwrap();
+        *generate_frame_flag = true;
+    }
+
+    /// Kill the current plugin thread and create a new one
+    fn restart(&mut self) {
+        // Clear the current frame
+        {
+            *self.frame.lock().unwrap() = vec![vec![[0; 4]; self.matrix_dimensions.0]; self.matrix_dimensions.1];
+        }
+
+        // Signal that the existing plugin thread should be stopped
+        {
+            *self.stop_plugin_thread.lock().unwrap() = true;
+        }
+
+        // Signal that a new plugin thread should be created
+        self.create_plugin_thread = true;
+    }
+
+    /// Handle any keyboard shortcuts
+    fn consume_shortcuts(&mut self, ctx: &Context) {
+        ctx.input_mut(|input_state| {
+            // If space is pressed, toggle autoplay
+            if input_state.consume_key(Modifiers::NONE, Key::Space) {
+                self.toggle_autoplay();
+            }
+
+            // If 'N' or right arrow is pressed and autoplay is off, step to the next frame
+            if (input_state.consume_key(Modifiers::NONE, Key::N) || input_state.consume_key(Modifiers::NONE, Key::ArrowRight)) && !*self.autoplay.lock().unwrap() {
+                self.step();
+            }
+
+            // If 'R' is pressed, restart the plugin
+            if input_state.consume_key(Modifiers::NONE, Key::R) {
+                self.restart()
+            }
+        });
+    }
+}
+
 /// GUI functions
 impl Simulator {
     fn matrix(&mut self, ctx: &Context) {
@@ -240,48 +292,32 @@ impl Simulator {
     }
 
     fn top_panel(&mut self, ctx: &Context) {
+
         egui::TopBottomPanel::top("controls").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                let freeze = self.freeze.lock().unwrap();
-                let mut autoplay = self.autoplay.lock().unwrap();
-
                 // Add autoplay toggle button
-                if ui.add_enabled(!*freeze, egui::ImageButton::new(if *autoplay {
+                if ui.add_enabled(!*self.freeze.lock().unwrap(), egui::ImageButton::new(if *self.autoplay.lock().unwrap() {
                         egui::include_image!("../assets/pause.png")
                     } else {
                         egui::include_image!("../assets/play.png")
                     }))
                     .clicked()
                 {
-                    // Toggle autoplay if clicked
-                    *autoplay = !*autoplay;
+                    self.toggle_autoplay();
                 };
 
                 // Add step button
-                if ui.add_enabled(!*autoplay && !*freeze, egui::ImageButton::new(egui::include_image!(
+                if ui.add_enabled(!*self.autoplay.lock().unwrap() && !*self.freeze.lock().unwrap(), egui::ImageButton::new(egui::include_image!(
                         "../assets/step.png"
                     )))
                     .clicked()
                 {
-                    // Tell the plugin update thread to generate a new frame
-                    let mut generate_frame_flag = self.generate_frame.lock().unwrap();
-                    *generate_frame_flag = true;
+                    self.step();
                 }
 
                 // Add plugin restart button
                 if ui.add_enabled(true, egui::ImageButton::new(egui::include_image!("../assets/restart.png"))).clicked() {
-                    // Clear the current frame
-                    {
-                        *self.frame.lock().unwrap() = vec![vec![[0; 4]; self.matrix_dimensions.0]; self.matrix_dimensions.1];
-                    }
-
-                    // Signal that the existing plugin thread should be stopped
-                    {
-                        *self.stop_plugin_thread.lock().unwrap() = true;
-                    }
-
-                    // Signal that a new plugin thread should be created
-                    self.create_plugin_thread = true;
+                    self.restart();
                 }
             });
         });
@@ -303,6 +339,9 @@ impl App for Simulator {
                 }
             };
         }
+
+        // Handle keyboard shortcuts
+        self.consume_shortcuts(ctx);
 
         // Install image loaders, if they aren't already installed
         egui_extras::install_image_loaders(ctx);
