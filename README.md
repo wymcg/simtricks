@@ -2,6 +2,9 @@
 
 Simtricks is a tool to run [Matricks](https://github.com/wymcg/matricks) plugins without a Raspberry Pi.
 
+![simtricks](https://github.com/wymcg/simtricks/assets/3410869/6f2837c4-0783-4b46-b985-48c9c2aef1b1)
+
+
 ## Installation
 - Install Rust and Cargo from the [Rust website](https://rustup.rs/)
 - Run `cargo install simtricks`
