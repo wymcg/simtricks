@@ -1,125 +1,105 @@
 use extism::Plugin;
-use matricks_plugin::{MatrixConfiguration, PluginUpdate};
-use serde_json::from_str;
-use std::path::PathBuf;
+use std::ops::DerefMut;
 use std::str::from_utf8;
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::thread::JoinHandle;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::{fs, thread};
 
-pub struct PluginThread {
-    pub join_handle: JoinHandle<()>,
-    pub channels: PluginThreadChannels,
-    pub path: PathBuf,
-}
-
-pub struct PluginThreadChannels {
-    pub update_rx: Receiver<PluginUpdate>,
-    pub log_rx: Receiver<String>,
-    pub is_done_rx: Receiver<()>,
-}
-
-pub fn start_plugin_thread(path: PathBuf, mat_config: MatrixConfiguration) -> PluginThread {
-    let (update_tx, update_rx) = channel::<PluginUpdate>();
-    let (log_tx, log_rx) = channel::<String>();
-    let (is_done_tx, is_done_rx) = channel::<()>();
-
-    PluginThread {
-        path: path.clone(),
-        join_handle: thread::spawn(|| plugin_thread(path, mat_config, update_tx, log_tx, is_done_tx)),
-        channels: PluginThreadChannels { update_rx, log_rx, is_done_rx },
-    }
-}
-
-fn plugin_thread(
-    path: PathBuf,
-    mat_config: MatrixConfiguration,
-    update_tx: Sender<PluginUpdate>,
-    log_tx: Sender<String>,
-    is_done_tx: Sender<()>,
+pub(crate) fn plugin_thread(
+    mut plugin: Plugin,
+    fps: f32,
+    frame_mutex: Arc<Mutex<Vec<Vec<[u8; 4]>>>>,
+    generate_frame_flag: Arc<Mutex<bool>>,
+    autoplay_flag: Arc<Mutex<bool>>,
+    freeze_flag: Arc<Mutex<bool>>,
+    kill_flag: Arc<Mutex<bool>>,
 ) {
-    // Calculate ms per frame
-    let target_frame_time_ms =
-        Duration::from_nanos((1_000_000_000.0 / mat_config.target_fps).round() as u64);
+    // Setup frame timing variables
+    let mut time_at_last_frame = Instant::now();
+    let time_between_frames = Duration::from_secs_f32(1.0 / fps);
 
-    // Prepare the matrix config string
-    let mat_config_string =
-        serde_json::to_string(&mat_config).expect("Unable to make matrix config string");
-
-    // Get the plugin data
-    let wasm = fs::read(path).expect("Unable to load plugin data");
-
-    // Make new context for plugin
-    let context = extism::Context::new();
-
-    // Make a new instance of the plugin
-    let mut plugin = Plugin::new(&context, wasm, [], true).expect("Unable to instantiate plugin");
-
-    match plugin.call("setup", &mat_config_string) {
-        Ok(_) => { /* Setup call ran without issue, no further action needed */ }
-        Err(_) => {
-            log_tx
-                .send("Unable to run setup function!".to_string())
-                .expect("Could not send log to main thread!");
+    // Call setup function of current active plugin
+    match plugin.call("setup", "") {
+        Ok(_) => {
+            log::info!("Successfully set up plugin.");
+        }
+        Err(e) => {
+            log::warn!("Failed to set up plugin.");
+            log::debug!("Failed to set up plugin with following error: {e}");
         }
     };
 
-    let mut last_frame_time = Instant::now();
-
     'update_loop: loop {
-        // Generate a frame if the target frame time has passed
-        if (Instant::now() - last_frame_time) >= target_frame_time_ms {
-            // Reset the last frame time
-            last_frame_time = Instant::now();
-
-            // Get an update from the plugin
-            let update_utf8 = match plugin.call("update", "") {
-                Ok(utf8) => utf8,
-                Err(_) => {
-                    log_tx.send("Unable to call update function! No further updates will be requested from this thread.".to_string()).expect("Could not send log to main thread!");
-                    is_done_tx.send(()).expect("Unable send done signal to main thread!");
-                    break 'update_loop;
-                }
-            };
-
-            // Convert UTF8 update to a string
-            let update_str = match from_utf8(update_utf8) {
-                Ok(str) => str,
-                Err(_) => {
-                    log_tx.send("Unable to convert UTF-8 response from the plugin! No further updates will be requested from this thread.".to_string()).expect("Could not send log to main thread!");
-                    is_done_tx.send(()).expect("Unable send done signal to main thread!");
-                    break 'update_loop;
-                }
-            };
-
-            // Convert string update to the plugin update struct
-            let update = match from_str::<PluginUpdate>(update_str) {
-                Ok(plugin_update) => plugin_update,
-                Err(_) => {
-                    log_tx.send("Malformed plugin update! No further updates will be requested from this thread.".to_string()).expect("Could not send log to main thread!");
-                    is_done_tx.send(()).expect("Unable send done signal to main thread!");
-                    break 'update_loop;
-                }
-            };
-
-            // Check if we should stop after this update
-            let should_halt = update.done;
-
-            // Send the update to the GUI
-            match update_tx.send(update) {
-                Ok(_) => { /* Update sent without issue, no further action required */ }
-                Err(_) => {
-                    /* Assume the main thread has started a new plugin thread and stop this thread */
-                    break 'update_loop;
-                }
-            }
-
-            // If the plugin requested to stop, then stop
-            if should_halt {
-                is_done_tx.send(()).expect("Unable send done signal to main thread!");
+        // Kill the thread if requested
+        {
+            if *kill_flag.lock().unwrap() {
+                log::info!("Received kill signal.");
                 break 'update_loop;
             }
         }
+
+        if (
+                // Is autoplay on, and has enough time passes for the given FPS?
+            *autoplay_flag.lock().unwrap()
+            && (Instant::now().duration_since(time_at_last_frame) >= time_between_frames))
+                // Or, does the simulator want us to generate a new frame?
+            || *generate_frame_flag.lock().unwrap()
+        {
+            // Reset the frame generate flag
+            if *generate_frame_flag.lock().unwrap() {
+                *generate_frame_flag.lock().unwrap() = false;
+            }
+
+            // Attempt to pull the next frame from the plugin, as a UTF8 JSON string
+            let new_state_utf8 = match plugin.call("update", "") {
+                Ok(utf8) => utf8,
+                Err(e) => {
+                    log::error!("Failed to receive update from plugin.");
+                    log::debug!(
+                        "Received the following error while polling for update from plugin: {e}"
+                    );
+                    break 'update_loop;
+                }
+            };
+
+            // Convert the UTF8 to a string
+            let new_state_str = match from_utf8(new_state_utf8) {
+                Ok(str) => str,
+                Err(e) => {
+                    log::error!("Failed to convert update from UTF8.");
+                    log::debug!("Received the following error while converting from UTF8: {e}");
+                    break 'update_loop;
+                }
+            };
+
+            // Deserialize the new state from a string
+            let new_state: Option<Vec<Vec<[u8; 4]>>> =
+                match serde_json::from_str::<Option<Vec<Vec<[u8; 4]>>>>(new_state_str) {
+                    Ok(update) => update,
+                    Err(_) => {
+                        log::error!("Invalid update returned from plugin.");
+                        break 'update_loop;
+                    }
+                };
+
+            // If the plugin signalled that it is done, exit this thread
+            let new_state: Vec<Vec<[u8; 4]>> = match new_state {
+                Some(new_state) => new_state,
+                None => {
+                    log::info!("Plugin has stopped providing updates.");
+                    break 'update_loop;
+                }
+            };
+
+            // Replace the previous frame with the new frame
+            let mut frame = frame_mutex.lock().unwrap();
+            let frame = frame.deref_mut();
+            *frame = new_state;
+
+            // Mark the time
+            time_at_last_frame = Instant::now();
+        }
     }
+
+    log::info!("Freezing simulator.");
+    *freeze_flag.lock().unwrap() = true;
 }

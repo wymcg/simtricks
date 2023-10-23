@@ -1,131 +1,249 @@
-use crate::plugin_thread::{start_plugin_thread, PluginThread};
-use chrono::prelude::*;
-use eframe::egui::{Context, Pos2, Rect, Rounding, Sense, Vec2};
+use crate::plugin_logs;
+use crate::plugin_thread::plugin_thread;
+use eframe::egui::{Context, Key, Modifiers, Pos2, Rect, Rounding, Sense, Vec2};
 use eframe::emath::RectTransform;
 use eframe::{egui, App, Frame};
-use matricks_plugin::{MatrixConfiguration, PluginUpdate};
+use extism::manifest::Wasm;
+use extism::{Function, Manifest, Plugin, ValType};
+use std::collections::BTreeMap;
+use std::error::Error;
+use std::fs::read;
+use std::ops::DerefMut;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
-const VERSION: Option<&str> = option_env!("CARGO_PKG_VERSION");
+/// A simulator for a single Matricks plugin
+pub(crate) struct Simulator {
+    /// Path to the plugin to simulate
+    path: PathBuf,
 
-pub struct DisplaySettings {
-    pub round_leds: bool,
+    /// Network hosts that the plugin may communicate with
+    allowed_hosts: Vec<String>,
+
+    /// Map a location on the host filesystem to the plugin filesystem
+    path_maps: Vec<(PathBuf, PathBuf)>,
+
+    /// The last frame retrieved from the plugin
+    frame: Arc<Mutex<Vec<Vec<[u8; 4]>>>>,
+
+    /// The dimensions of the matrix (width in number of LEDs, height in number of LEDs)
+    matrix_dimensions: (usize, usize),
+
+    /// Frames per second
+    fps: f32,
+
+    /// If true, a new plugin thread should be created
+    create_plugin_thread: bool,
+
+    /// If true, the plugin thread should generate a new frame
+    generate_frame: Arc<Mutex<bool>>,
+
+    /// If true, the plugin thread should automatically generate new frames, no matter what `generate_frame` is
+    autoplay: Arc<Mutex<bool>>,
+
+    /// If true, do not allow the user to continue to interact with the UI
+    freeze: Arc<Mutex<bool>>,
+
+    /// If true, tell the current plugin thread to quit
+    stop_plugin_thread: Arc<Mutex<bool>>,
 }
 
-pub struct SimulatorApp {
-    plugin_thread: Option<PluginThread>,
-    matrix_config: MatrixConfiguration,
-    current_matrix_config: MatrixConfiguration,
-    status_msg: String,
-    last_update: Option<PluginUpdate>,
-    display_settings: DisplaySettings,
-}
+/// Utility functions
+impl Simulator {
+    /// Create a new simulator for a plugin
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the plugin to simulate
+    /// * `matrix_dimensions` - The dimensions of the matrix. Width, then height.
+    /// * `fps` - Frames per second
+    /// * `allowed_hosts` - Hosts to allow the plugin to communicate with
+    /// * `path_maps` - Local paths to map to the plugin filesystem, as two paths separated by a '>'.
+    pub(crate) fn new(
+        path: PathBuf,
+        matrix_dimensions: (usize, usize),
+        fps: f32,
+        allowed_hosts: Vec<String>,
+        path_maps: Vec<(PathBuf, PathBuf)>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(Self {
+            path,
+            allowed_hosts,
+            path_maps,
+            frame: Arc::new(Mutex::new(vec![
+                vec![[0; 4]; matrix_dimensions.0];
+                matrix_dimensions.1
+            ])),
+            matrix_dimensions,
+            fps,
+            create_plugin_thread: true,
+            generate_frame: Arc::new(Mutex::new(false)),
+            autoplay: Arc::new(Mutex::new(false)),
+            freeze: Arc::new(Mutex::new(false)),
+            stop_plugin_thread: Arc::new(Mutex::new(false)),
+        })
+    }
 
-impl Default for SimulatorApp {
-    fn default() -> Self {
-        Self {
-            plugin_thread: None,
-            matrix_config: MatrixConfiguration {
-                width: 12,
-                height: 12,
-                target_fps: 30.0,
-                serpentine: false,
-                magnification: 1.0,
-                brightness: u8::MAX,
-            },
-            current_matrix_config: MatrixConfiguration::default(),
-            status_msg: format!("Welcome to Simtricks v{}!", VERSION.unwrap_or("unknown")),
-            last_update: None,
-            display_settings: DisplaySettings { round_leds: false },
+    fn spawn_thread(&mut self) -> Result<(), Box<dyn Error>> {
+        log::info!("Spawning a new plugin thread.");
+
+        // Reset relevant plugin flags
+        self.create_plugin_thread = false;
+        {
+            *self.stop_plugin_thread.lock().unwrap() = false;
         }
-    }
-}
+        {
+            *self.generate_frame.lock().unwrap() = true;
+        }
 
-impl App for SimulatorApp {
-    fn update(&mut self, ctx: &Context, frame: &mut Frame) {
-        // Non-gui tasks
-        self.check_for_update(ctx);
-        self.check_for_log();
-        self.check_for_halt();
+        // Pull WASM data from the given file
+        let wasm_data = read(self.path.clone())?;
+        let wasm = Wasm::from(wasm_data);
 
-        // Render the GUI
-        self.render_menu_bar(ctx, frame);
-        self.render_matrix(ctx, frame);
-        self.render_status_bar(ctx, frame);
-    }
-}
+        // Create a new manifest for the plugin
+        let manifest = Manifest::new([wasm])
+            .with_allowed_hosts(self.allowed_hosts.clone().into_iter())
+            .with_allowed_paths(self.path_maps.clone().into_iter());
 
-impl SimulatorApp {
-    /// Render the menu bar at the top of the screen
-    fn render_menu_bar(&mut self, ctx: &Context, _frame: &mut Frame) {
-        egui::TopBottomPanel::top("menu bar").show(ctx, |ui| {
-            egui::menu::bar(ui, |ui| {
-                // Plugin open functions
-                ui.menu_button("File", |ui| {
-                    if ui.button("Open").clicked() {
-                        // Have the user pick a plugin
-                        match rfd::FileDialog::new()
-                            .set_title("Choose a plugin")
-                            .add_filter("Matricks Plugin", &["wasm", "mtx"])
-                            .pick_file()
-                        {
-                            None => { /* No file picked, so do nothing */ }
-                            Some(path) => {
-                                self.start_plugin(path.clone());
-                            }
-                        }
-                    }
-                });
+        // Create the config
+        let mut matricks_config: BTreeMap<String, Option<String>> = BTreeMap::new();
+        matricks_config.insert(
+            String::from("width"),
+            Some(format!("{}", self.matrix_dimensions.0)),
+        );
+        matricks_config.insert(
+            String::from("height"),
+            Some(format!("{}", self.matrix_dimensions.1)),
+        );
+        matricks_config.insert(String::from("target_fps"), Some(format!("{}", self.fps)));
+        matricks_config.insert(String::from("serpentine"), Some(format!("{}", true)));
+        matricks_config.insert(String::from("brightness"), Some(format!("{}", 255u8)));
 
-                // Matrix configuration settings
-                ui.menu_button("Matrix", |ui| {
-                    ui.add(
-                        egui::Slider::new(&mut self.matrix_config.target_fps, 1.0..=60.0)
-                            .text("FPS"),
-                    );
-                    ui.add(egui::Slider::new(&mut self.matrix_config.width, 1..=128).text("Width"));
-                    ui.add(
-                        egui::Slider::new(&mut self.matrix_config.height, 1..=128).text("Height"),
-                    );
-                    if ui.button("Reload Matrix").clicked() {
-                        // Attempt to pull the path from the current plugin thread struct
-                        let path: Option<PathBuf> = match &self.plugin_thread {
-                            None => None,
-                            Some(plugin_thread) => Some(plugin_thread.path.clone()),
-                        };
+        // Setup the host functions
+        let plugin_debug_log_function = Function::new(
+            "matricks_debug",
+            [ValType::I64],
+            [],
+            None,
+            plugin_logs::plugin_debug_log,
+        );
+        let plugin_info_log_function = Function::new(
+            "matricks_info",
+            [ValType::I64],
+            [],
+            None,
+            plugin_logs::plugin_info_log,
+        );
+        let plugin_warn_log_function = Function::new(
+            "matricks_warn",
+            [ValType::I64],
+            [],
+            None,
+            plugin_logs::plugin_warn_log,
+        );
+        let plugin_error_log_function = Function::new(
+            "matricks_error",
+            [ValType::I64],
+            [],
+            None,
+            plugin_logs::plugin_error_log,
+        );
+        let plugin_functions = [
+            plugin_debug_log_function,
+            plugin_info_log_function,
+            plugin_warn_log_function,
+            plugin_error_log_function,
+        ];
 
-                        // If we were able to get a path, launch a new plugin with it
-                        match path {
-                            None => self.set_status_msg(
-                                "No active plugin, reload will be ignored".to_string(),
-                            ),
-                            Some(path) => {
-                                self.start_plugin(path);
-                                self.set_status_msg("Plugin reloaded.".to_string());
-                            }
-                        }
-                    }
-                });
+        // Create the plugin
+        let plugin = Plugin::create_with_manifest(&manifest, plugin_functions.clone(), true)?
+            .with_config(&matricks_config)?;
 
-                // Display settings
-                ui.menu_button("Display", |ui| {
-                    ui.checkbox(&mut self.display_settings.round_leds, "Round LEDs");
-                });
+        // Setup and spawn the plugin thread
+        {
+            let frame = Arc::clone(&self.frame);
+            let generate_frame = Arc::clone(&self.generate_frame);
+            let autoplay = Arc::clone(&self.autoplay);
+            let freeze = Arc::clone(&self.freeze);
+            let stop_plugin_thread = Arc::clone(&self.stop_plugin_thread);
+            let fps = self.fps.clone();
+            thread::spawn(move || {
+                plugin_thread(
+                    plugin,
+                    fps,
+                    frame,
+                    generate_frame,
+                    autoplay,
+                    freeze,
+                    stop_plugin_thread,
+                )
             });
+        }
+
+        Ok(())
+    }
+}
+
+/// Control functions
+impl Simulator {
+    /// Play/pause the plugin
+    fn toggle_autoplay(&mut self) {
+        let mut autoplay = self.autoplay.lock().unwrap();
+        *autoplay = !*autoplay;
+    }
+
+    /// Go to the next frame
+    fn step(&mut self) {
+        // Tell the plugin update thread to generate a new frame
+        let mut generate_frame_flag = self.generate_frame.lock().unwrap();
+        *generate_frame_flag = true;
+    }
+
+    /// Kill the current plugin thread and create a new one
+    fn restart(&mut self) {
+        // Clear the current frame
+        {
+            *self.frame.lock().unwrap() =
+                vec![vec![[0; 4]; self.matrix_dimensions.0]; self.matrix_dimensions.1];
+        }
+
+        // Signal that the existing plugin thread should be stopped
+        {
+            *self.stop_plugin_thread.lock().unwrap() = true;
+        }
+
+        // Signal that a new plugin thread should be created
+        self.create_plugin_thread = true;
+    }
+
+    /// Handle any keyboard shortcuts
+    fn consume_shortcuts(&mut self, ctx: &Context) {
+        ctx.input_mut(|input_state| {
+            // If space is pressed, toggle autoplay
+            if input_state.consume_key(Modifiers::NONE, Key::Space) {
+                self.toggle_autoplay();
+            }
+
+            // If 'N' or right arrow is pressed and autoplay is off, step to the next frame
+            if (input_state.consume_key(Modifiers::NONE, Key::N)
+                || input_state.consume_key(Modifiers::NONE, Key::ArrowRight))
+                && !*self.autoplay.lock().unwrap()
+            {
+                self.step();
+            }
+
+            // If 'R' is pressed, restart the plugin
+            if input_state.consume_key(Modifiers::NONE, Key::R) {
+                self.restart()
+            }
         });
     }
+}
 
-    /// Render the simulated LED matrix
-    fn render_matrix(&mut self, ctx: &Context, _frame: &mut Frame) {
-        // Get the last update, if there was one
-        let last_update = match &self.last_update {
-            None => {
-                // No last update, so return
-                return;
-            }
-            Some(update) => update
-        };
-
+/// GUI functions
+impl Simulator {
+    fn matrix(&mut self, ctx: &Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
             // Allocate our painter
             let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click());
@@ -138,168 +256,119 @@ impl SimulatorApp {
 
             // Calculate the LED sidelength for x and y based on the window size and number of pixels, and choose smallest value for LED sidelength
             let sidelength = [
-                response.rect.width() / self.current_matrix_config.width as f32, // Sidelength from width
-                response.rect.height() / self.current_matrix_config.height as f32, // Sidelength from height
+                response.rect.width() / self.matrix_dimensions.0 as f32, // Sidelength from width
+                response.rect.height() / self.matrix_dimensions.1 as f32, // Sidelength from height
             ]
             .iter()
             .min_by(|a, b| a.partial_cmp(b).unwrap()) // Pick smaller of the two
             .unwrap()
             .clone(); // It's still a &f32, so clone it
 
-            // Setup the LED roundness parameter
-            let rounding = if self.display_settings.round_leds {
-                Rounding::same(sidelength)
-            } else {
-                Rounding::none()
-            };
+            // Grab the frame
+            let mut frame = self.frame.lock().unwrap();
+            let frame = frame.deref_mut();
 
-            // Draw the LEDs if the plugin update state is consistent with the current matrix config
-            if last_update.state.len() > 0
-                && last_update.state.len() == self.current_matrix_config.height
-                && last_update.state[0].len() == self.current_matrix_config.width
-            {
-                for y in 0..self.current_matrix_config.height {
-                    for x in 0..self.current_matrix_config.width {
-                        // Grab the color of this LED from the last update
-                        let led_color = egui::Color32::from_rgba_premultiplied(
-                            last_update.state[y][x][2],
-                            last_update.state[y][x][1],
-                            last_update.state[y][x][0],
-                            last_update.state[y][x][3],
-                        );
+            for y in 0..self.matrix_dimensions.1 {
+                for x in 0..self.matrix_dimensions.0 {
+                    // Grab the color of this LED from the last update
+                    let led_color = egui::Color32::from_rgba_premultiplied(
+                        frame[y][x][2],
+                        frame[y][x][1],
+                        frame[y][x][0],
+                        frame[y][x][3],
+                    );
 
-                        // Draw the LED
-                        painter.rect_filled(
-                            Rect::from_min_size(
-                                to_screen.transform_pos(Pos2::new(
-                                    x as f32 * sidelength,
-                                    y as f32 * sidelength,
-                                )),
-                                Vec2::new(sidelength, sidelength),
-                            ),
-                            rounding,
-                            led_color,
-                        );
-                    }
+                    // Draw the LED
+                    painter.rect_filled(
+                        Rect::from_min_size(
+                            to_screen.transform_pos(Pos2::new(
+                                x as f32 * sidelength,
+                                y as f32 * sidelength,
+                            )),
+                            Vec2::new(sidelength, sidelength),
+                        ),
+                        Rounding::ZERO,
+                        led_color,
+                    );
                 }
             }
         });
     }
 
-    /// Render the status message at the bottom of the screen
-    fn render_status_bar(&mut self, ctx: &Context, _frame: &mut Frame) {
-        egui::TopBottomPanel::bottom("status_msg").show(ctx, |ui| {
+    fn top_panel(&mut self, ctx: &Context) {
+        egui::TopBottomPanel::top("controls").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                // Display the current status message
-                ui.label(self.status_msg.clone());
+                // Add autoplay toggle button
+                if ui
+                    .add_enabled(
+                        !*self.freeze.lock().unwrap(),
+                        egui::ImageButton::new(if *self.autoplay.lock().unwrap() {
+                            egui::include_image!("../assets/pause.png")
+                        } else {
+                            egui::include_image!("../assets/play.png")
+                        }),
+                    )
+                    .on_hover_text("Play/pause plugin (space)")
+                    .clicked()
+                {
+                    self.toggle_autoplay();
+                };
 
-                // Show a loading spinner if there is an active plugin, but not a plugin update
-                if self.last_update.is_none() && self.plugin_thread.is_some() {
-                    ui.add(egui::Spinner::new());
+                // Add step button
+                if ui
+                    .add_enabled(
+                        !*self.autoplay.lock().unwrap() && !*self.freeze.lock().unwrap(),
+                        egui::ImageButton::new(egui::include_image!("../assets/step.png")),
+                    )
+                    .on_hover_text("Step to next frame (N)")
+                    .clicked()
+                {
+                    self.step();
+                }
+
+                // Add plugin restart button
+                if ui
+                    .add_enabled(
+                        true,
+                        egui::ImageButton::new(egui::include_image!("../assets/restart.png")),
+                    )
+                    .on_hover_text("Restart plugin (R)")
+                    .clicked()
+                {
+                    self.restart();
                 }
             });
         });
     }
+}
 
-    /// Set the message in the status bar
-    fn set_status_msg(&mut self, msg: String) {
-        self.status_msg = format!("[{}]> {msg}", Utc::now().format("%H:%M:%S"));
-    }
+impl App for Simulator {
+    fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
+        // Create a new plugin thread, if there isn't one already
+        if self.create_plugin_thread {
+            match self.spawn_thread() {
+                Ok(_) => {
+                    // Unfreeze the simulator
+                    *self.freeze.lock().unwrap() = false;
+                }
+                Err(_) => {
+                    log::error!("Failed to create a new plugin thread.");
+                    *self.freeze.lock().unwrap() = true;
+                }
+            };
+        }
 
-    /// Start a new plugin thread from a path to a plugin
-    fn start_plugin(&mut self, path: PathBuf) {
-        // Get a snapshot of the current matrix config
-        self.current_matrix_config = self.matrix_config.clone();
+        // Handle keyboard shortcuts
+        self.consume_shortcuts(ctx);
 
-        // Clear the last plugin update
-        self.last_update = None;
+        // Install image loaders, if they aren't already installed
+        egui_extras::install_image_loaders(ctx);
 
-        // Start a new plugin thread
-        self.plugin_thread = Some(start_plugin_thread(
-            path.clone(),
-            self.current_matrix_config.clone(),
-        ));
-
-        // Tell user that a new plugin was started
-        self.set_status_msg(format!(
-            "Plugin started with path {}",
-            path.to_str().unwrap()
-        ));
-    }
-
-    /// Attempt to receive and handle an update from the currently active plugin, if there is one
-    fn check_for_update(&mut self, ctx: &Context) {
-        // Grab the plugin thread if there is one, otherwise return without doing anything
-        let plugin_thread = match &self.plugin_thread {
-            Some(plugin_thread) => plugin_thread,
-            None => return
-        };
-
-        // Request a repaint
+        // Force a repaint
         ctx.request_repaint();
 
-        // Attempt to pull an update from the thread. If there was none, return without doing anything
-        let update = match plugin_thread.channels.update_rx.try_recv() {
-            Ok(update) => update,
-            Err(_) => return
-        };
-
-        // If there are logs from the plugin, display them on the status bar
-        match &update.log_message {
-            None => { /* No logs, so do nothing */ }
-            Some(logs) => {
-                // Combine the logs into a single string
-                let mut combined_logs = String::new();
-                for log in logs {
-                    combined_logs.push_str(log);
-                    combined_logs.push('\n');
-                }
-
-                // Push the all logs to the status bar as a single string
-                self.set_status_msg(combined_logs);
-            }
-        }
-
-        // Save this update
-        self.last_update = Some(update);
-    }
-
-    /// Check for logs from the plugin thread
-    fn check_for_log(&mut self) {
-        let plugin_thread = match &self.plugin_thread {
-            None => {
-                // No active plugin, so return
-                return;
-            }
-            Some(pt) => pt
-        };
-
-        let log = match plugin_thread.channels.log_rx.try_recv() {
-            Ok(log) => log,
-            Err(_) => {
-                // No log, so return
-                return;
-            }
-        };
-
-        self.set_status_msg(log);
-
-    }
-
-    /// Check if the plugin thread has halted or not
-    fn check_for_halt(&mut self) {
-        let plugin_thread = match &self.plugin_thread {
-            None => {
-                // No active thread, so return
-                return;
-            }
-            Some(pt) => pt
-        };
-
-        // If we receive anything over the halt channel, the thread has stopped (or is stopping)
-        if plugin_thread.channels.is_done_rx.try_recv().is_ok() {
-            // Clear the current plugin
-            self.plugin_thread = None;
-        }
+        // Draw the GUI
+        self.top_panel(ctx);
+        self.matrix(ctx);
     }
 }
